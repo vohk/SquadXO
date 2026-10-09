@@ -73,7 +73,7 @@ jobs:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
           RELEASE_REVISION: ${{ steps.version.outputs.revision }}
         run: node scripts/smoke-production-package.mjs "artifacts/squadxo-$RELEASE_VERSION.tar.gz" "$RELEASE_VERSION" "$RELEASE_REVISION"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: squadxo-${{ steps.version.outputs.version }}
           path: |
@@ -88,7 +88,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: squadxo-${{ needs.validate.outputs.version }}
           path: release-assets
