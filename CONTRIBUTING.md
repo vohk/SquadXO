@@ -28,3 +28,5 @@ Native plugins follow the [authoring contract](docs/contracts/native-plugin-auth
 Edit generated documentation and config through `squad-server/templates/` and plugin metadata. Run `npm run build-all` to regenerate `config.example.json`, `README.md` and `docs/reference/plugins.md`, then run `dist/test/config/generated-artifacts.test.js` through the focused runner. `build-readme` also generates the reference; `build-reference` generates only the reference. Both rebuild first.
 
 When adding or removing runtime TypeScript or legacy plugin/layer JavaScript, review [scripts/package-inputs.json](scripts/package-inputs.json); packaging requires exact inventory equality. See [Deployment](docs/deployment/production.md) for release checks and the production layout: `config.json` beside `index.js`, with startup from the application root.
+
+Pull requests run **PR validation** on GitHub-hosted runners with lint, types, a clean build and full tests including PostgreSQL and MariaDB. The check runs for every PR, including documentation changes; it does not package or publish releases.
