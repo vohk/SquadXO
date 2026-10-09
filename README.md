@@ -8,7 +8,8 @@ SquadXO connects to a Squad dedicated server through RCON and `SquadGame.log`, m
 
 - EOS-first player state and DBLog history, while retaining optional Steam IDs for existing integrations.
 - A versioned native plugin API with typed options and connectors, scoped resource cleanup, and legacy plugin compatibility.
-- Ergonomic improvements like layer-list sources in configs, automatic ordering of config keys, and more. Supports PostgreSQL, MariaDB/MySQL and SQLite.
+- Supports persistance through PostgreSQL, MariaDB/MySQL and SQLite.
+- Ergonomic improvements like layer-list sources in configs, automatic ordering of config keys, and more.
 
 **Upgrading from SquadJS or an earlier fork?** Back up your application, configuration and database, and read [Migration](docs/deployment/migration.md) before starting the new runtime. Keep your working config; generated defaults are examples, not a replacement for production settings.
 
