@@ -19,7 +19,13 @@ Regenerate and commit changed source artifacts before packaging: a Git checkout 
 
 `BUILD_INFO.json` records the version and source revision; a source tree without `.git` records a null revision for local validation only.
 
-The [build workflow](../../.github/workflows/build.yml) validates and retains archives on manual runs. In `vohk/SquadXO`, pushing a `v*` tag that matches `package.json` also publishes the validated archive and checksum as a GitHub release; prerelease versions are marked as prereleases. Other repositories do not publish releases through this workflow. Deployment remains a separate action.
+The [build workflow](../../.github/workflows/build.yml) retains validated archives on manual runs. For validation only, leave **version** empty and **release** unchecked.
+
+To prepare a version in `vohk/SquadXO`, select **Actions → Validate and release SquadXO → Run workflow**, choose **main**, enter a version such as `1.0.2` (without `v`), and leave **release** unchecked. The run synchronizes workspace manifests and the lockfile in a local bot commit, validates it, and pushes a `release/v1.0.2` branch. Follow the run summary's link to open a PR, review it and merge it through the normal main protection. Existing version branches are never overwritten. Bot PR creation is disabled in the current repository settings, so opening the PR is a maintainer action; no settings or credentials need changing.
+
+After merging that version PR, rerun on **main** with the same **version** and **release** checked. The version must already match every manifest and the lockfile. After lint, full tests and the package smoke test pass, the workflow tags the exact validated main revision and publishes its archive and checksum with generated notes. It never pushes to main. Publication uses the same run because `GITHUB_TOKEN`-created tags do not trigger another workflow. Only the version-branch and publication jobs have write permission. Bot commits and annotated tags are unsigned; maintainer-created tags can still use the configured signer.
+
+Existing tags/releases and a main revision that changed before publication stop the web release. If publication fails after the tag push, retain that run's validated artifacts and finish the release for that exact tag; do not move or delete it. Other repositories cannot publish through this workflow. Pushing a maintainer-created `v*` tag that matches the manifests still validates and publishes that revision. Stable releases are marked latest for latest-release API consumers; prereleases are excluded. Deployment remains a separate action.
 
 ## Install and start
 

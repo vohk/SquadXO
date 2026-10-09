@@ -1,0 +1,51 @@
+name: Pull request validation
+on:
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: squadxo-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  validate:
+    name: PR validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: squadjs
+          POSTGRES_USER: squadjs
+          POSTGRES_PASSWORD: squadjs-test-only
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U squadjs -d squadjs"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      mariadb:
+        image: mariadb:11.8
+        env:
+          MARIADB_DATABASE: squadjs
+          MARIADB_ROOT_PASSWORD: squadjs-test-only
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DB_TEST_POSTGRES_URL: postgres://squadjs:squadjs-test-only@127.0.0.1:5432/squadjs
+      DB_TEST_MARIADB_URL: mariadb://root:squadjs-test-only@127.0.0.1:3306/squadjs
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.18.0
+          cache: npm
+      - name: Verify npm toolchain
+        run: test "$(npm --version)" = 11.16.0
+      - run: npm ci
+      - name: Lint and type checks
+        run: npm run lint
+      - name: Build and full tests
+        run: npm test
