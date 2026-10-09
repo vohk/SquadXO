@@ -13,6 +13,16 @@ SquadXO connects to a Squad dedicated server through RCON and `SquadGame.log`, m
 
 **Upgrading from SquadJS or an earlier fork?** Back up your application, configuration and database, and read [Migration](docs/deployment/migration.md) before starting the new runtime. Keep your working config; generated defaults are examples, not a replacement for production settings.
 
+> [!NOTE]
+> SquadXO has been my personal project to maintain The Unnamed's SquadJS ecosystem and learn a little bit about the guts at the same time. It is unashamedly AI-developed, although hopefully exercised enough to avoid being slop. We’ve been using it in production for 3 months as of the v1.0.0 release.
+> [!WARNING]
+>
+> SquadXO is *almost* a drop in replacement for a standard SquadJS installation, but there are some important caveats:
+>
+> * If you have multiple SquadJS instances writing to the same database, be sure to read [migration.md](docs/deployment/migration.md) carefully. Complete the EOS ID backfill from a single instance before bringing the others online.
+> * All stock legacy plugins should either be supported or explicitly superseded. Please open an issue for any breakage found.
+> * Custom legacy plugins with unusual behaviour may not function due to deliberate compatibility limitations, and should generally be migrated to the new native interface.
+
 ## Setup
 
 Use Node.js 24.x. The [production guide](docs/deployment/production.md#install-and-start) covers archive verification, configuration, startup and rollback. A compiled release needs only production dependencies; do not run build or generation commands in an extracted release.

@@ -8,11 +8,11 @@ Legacy plugins that depend on unsupported internals may be removed from the main
 
 ## Party-aware team changes
 
-SmartSwitch and TeamRandomizer keep each party together during automatic shuffling and balancing, including party ID zero and parties spanning squads. Under the current server assumption, the single `Is Leader` member is also the party leader; that leader is commanded first. Missing or multiple leaders stop a whole-party move with an explicit error. An ordinary member's explicit SmartSwitch request remains individual; a leader request includes the entire party and checks its projected team gap before moving anyone. Parties can leave a residual imbalance when no whole party fits.
+The shared team-switch helper groups players by team and party ID, including party ID zero and parties spanning squads. Disabling squad grouping does not disable party grouping. For a multi-player party move, exactly one member must have `isLeader`; that member is commanded first.
 
-Switchers refresh the roster and verify the destination after each command. A server-moved party member already at its destination is skipped. Empty, malformed, duplicate, or incomplete rosters stop the operation; an unconfirmed command is not automatically retried. SmartSwitch retains failed queues and partial shuffle destinations, deduplicates overlapping queued players and squads, and records cooldowns only for observed moves. Its queue table gains a nullable `targetTeamID` through an additive, idempotent migration. Queue destinations survive retries; in-memory squad/shuffle plans survive only while the plugin instance runs.
+The helper refreshes the roster and verifies the destination after each command. It skips planned players already at their destination, including members moved with their leader by the server. Empty, invalid, duplicate or incomplete rosters stop the operation. Unconfirmed commands are not automatically retried, and unexpected moves outside the plan stop further commands.
 
-Keep local plugins disabled during parser capture and offline verification. These changes have not been validated by performing production team changes; review the deployed server's leader behavior before enabling the switchers there.
+See [SmartSwitch behavior](../reference/plugins.md#smartswitch-behavior) for request, queue and balancing policy.
 
 ## External modules
 
@@ -22,4 +22,16 @@ Legacy configuration may select an external ESM module explicitly:
 { "plugin": "ExamplePlugin", "module": "../external-plugins/example.mjs", "enabled": true }
 ```
 
-The module path is resolved relative to the configuration file. It must export a default class whose name matches `plugin`; options and connector requirements retain the legacy behavior. Disabled entries are not imported. Explicit modules bypass bundled discovery, allowing self-contained/minified plugins without relying on source-text class discovery. Name-only minified discovery matches the configured class name to a kebab-case `.min.js` or `.build.min.js` filename (with an optional historical `squadjs-` prefix); unrelated minified files are skipped without being read or imported. Module imports are trusted executable code; planning imports them before runtime connections start. Keep external modules and their dependencies outside the replaceable release directory. Relative imports and package dependencies resolve from the external module's directory, not from the configuration file. Unbundled plugins that import `./base-plugin.js` need that sibling dependency (a local re-export of the release's maintained base class is sufficient) and their own resolvable dependencies; the loader does not install them. Native modules use their existing `type: "native"` configuration instead.
+The module path is resolved relative to the configuration file. It must export a default class whose name matches `plugin`; options and connector requirements retain the legacy behavior.
+
+Disabled entries are not imported. Explicit modules bypass bundled discovery, allowing self-contained/minified plugins without relying on source-text class discovery.
+
+Name-only minified discovery matches the configured class name to a kebab-case `.min.js` or `.build.min.js` filename (with an optional historical `squadjs-` prefix); unrelated minified files are skipped without being read or imported.
+
+Module imports are trusted executable code; planning imports them before runtime connections start.
+
+Relative imports and package dependencies resolve from the external module's directory, not from the configuration file.
+
+Unbundled plugins that import `./base-plugin.js` need that sibling dependency (a local re-export of the release's maintained base class is sufficient) and their own resolvable dependencies; the loader does not install them.
+
+Native modules use their existing `type: "native"` configuration instead.

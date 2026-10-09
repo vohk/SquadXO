@@ -1,6 +1,10 @@
 # Contributing to SquadXO
 
-AI-written contributions are welcome. Please begin every pull request with a short, human-written note explaining the intent of the change.
+While AI-written contributions are welcome, to keep the maintenance burden reasonable we request prospective contributors put more effort into explaining their PR than the maintainer will need to spend reading it.
+
+Please begin every pull request with a short, human-written note explaining the intent of the change. If English is not your first language, AI translation is acceptable but please provide the note in your native tongue as well.
+
+PRs should be kept to reasonable size and limited in scope to a single issue.
 
 Use Node.js 24.x and the npm version in `package.json`:
 
