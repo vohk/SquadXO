@@ -3,10 +3,19 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version without v (required when publishing)'
+        type: string
+        required: false
+      release:
+        description: 'Publish a release after validation (main only)'
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
-  group: squadxo-${{ github.ref }}
+  group: squadxo-${{ github.repository }}
   cancel-in-progress: false
 jobs:
   validate:
@@ -43,10 +52,28 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+          ref: ${{ github.sha }}
+          fetch-depth: 0
       - uses: actions/setup-node@v6
         with:
           node-version: 24.18.0
           cache: npm
+      - name: Prepare web release version
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          WEB_RELEASE: ${{ inputs.release }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+          REF: ${{ github.ref }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          if [ "$WEB_RELEASE" = true ]; then
+            test "$REPOSITORY" = vohk/SquadXO
+            test "$REF" = refs/heads/main
+            node scripts/prepare-web-release.mjs "$REQUESTED_VERSION"
+          elif [ -n "$REQUESTED_VERSION" ]; then
+            echo 'A version input requires the release option; validation-only runs use the checked-out version.' >&2
+            exit 1
+          fi
       - name: Validate version
         id: version
         env:
@@ -64,7 +91,7 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm test
-      - name: Package tagged source
+      - name: Package validated source
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: npm run package:production -- --version "$RELEASE_VERSION"
@@ -80,14 +107,44 @@ jobs:
             artifacts/squadxo-${{ steps.version.outputs.version }}.tar.gz
             artifacts/squadxo-${{ steps.version.outputs.version }}.tar.gz.sha256
           if-no-files-found: error
+      - name: Preserve validated release commit
+        if: github.event_name == 'workflow_dispatch' && inputs.release && steps.version.outputs.revision != github.sha
+        run: git bundle create "$RUNNER_TEMP/release-source.bundle" HEAD --not "${{ github.sha }}"
+      - uses: actions/upload-artifact@v7
+        if: github.event_name == 'workflow_dispatch' && inputs.release && steps.version.outputs.revision != github.sha
+        with:
+          name: validated-release-source
+          path: ${{ runner.temp }}/release-source.bundle
+          if-no-files-found: error
   release:
-    if: github.repository == 'vohk/SquadXO' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: github.repository == 'vohk/SquadXO' && ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.release && github.ref == 'refs/heads/main'))
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.18.0
+      - uses: actions/download-artifact@v8
+        if: github.event_name == 'workflow_dispatch' && needs.validate.outputs.revision != github.sha
+        with:
+          name: validated-release-source
+          path: ${{ runner.temp }}/validated-source
+      - name: Restore validated revision
+        if: github.event_name == 'workflow_dispatch' && needs.validate.outputs.revision != github.sha
+        env:
+          RELEASE_REVISION: ${{ needs.validate.outputs.revision }}
+        run: |
+          git fetch "$RUNNER_TEMP/validated-source/release-source.bundle" HEAD
+          test "$(git rev-parse FETCH_HEAD)" = "$RELEASE_REVISION"
+          git checkout --detach "$RELEASE_REVISION"
       - uses: actions/download-artifact@v8
         with:
           name: squadxo-${{ needs.validate.outputs.version }}
@@ -98,11 +155,10 @@ jobs:
           GH_REPO: vohk/SquadXO
           RELEASE_VERSION: ${{ needs.validate.outputs.version }}
           PRERELEASE: ${{ needs.validate.outputs.prerelease }}
+          RELEASE_REVISION: ${{ needs.validate.outputs.revision }}
+          BASE_REVISION: ${{ github.sha }}
+          WEB_RELEASE: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
-          cd release-assets
-          sha256sum --check "squadxo-$RELEASE_VERSION.tar.gz.sha256"
-          FLAGS=()
-          if [ "$PRERELEASE" = true ]; then FLAGS+=(--prerelease --latest=false); fi
-          gh release create "$RELEASE_VERSION" \
-            "squadxo-$RELEASE_VERSION.tar.gz" "squadxo-$RELEASE_VERSION.tar.gz.sha256" \
-            --verify-tag --title "SquadXO $RELEASE_VERSION" --generate-notes "${FLAGS[@]}"
+          (cd release-assets && sha256sum --check "squadxo-$RELEASE_VERSION.tar.gz.sha256")
+          gh auth setup-git
+          node scripts/publish-release.mjs

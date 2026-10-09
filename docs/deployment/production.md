@@ -19,7 +19,11 @@ Regenerate and commit changed source artifacts before packaging: a Git checkout 
 
 `BUILD_INFO.json` records the version and source revision; a source tree without `.git` records a null revision for local validation only.
 
-The [build workflow](../../.github/workflows/build.yml) validates and retains archives on manual runs. In `vohk/SquadXO`, pushing a `v*` tag that matches `package.json` also publishes the validated archive and checksum as a GitHub release; prerelease versions are marked as prereleases. Other repositories do not publish releases through this workflow. Deployment remains a separate action.
+The [build workflow](../../.github/workflows/build.yml) retains validated archives on manual runs. For validation only, leave **version** empty and **release** unchecked.
+
+To publish from GitHub in `vohk/SquadXO`, select **Actions → Validate and release SquadXO → Run workflow**, choose **main**, enter a version such as `1.0.2` (without `v`), and check **release**. The run synchronizes all workspace manifests and the lockfile in a local GitHub Actions bot commit, then runs lint, tests and the production-package smoke test. Only after validation does it atomically push that commit to main and create its annotated tag, then publish the validated archive and checksum with generated release notes. Publication uses the same run because tags created by `GITHUB_TOKEN` do not trigger another workflow. No additional credentials are needed; branch rules must permit the existing token to update main. Bot commits and tags are unsigned; maintainer-created tags can still use the configured signer.
+
+A moved main, existing tag or existing release stops web publication rather than overwriting history. If publication fails after the atomic push, the tag remains: retain the successful run's artifacts and finish the release for that exact tag; do not move or delete it. Other repositories cannot publish through this workflow. Pushing a maintainer-created `v*` tag that matches the manifests still validates and publishes that revision. Stable releases are marked latest for consumers of the latest-release API; prereleases are excluded from latest. Deployment remains a separate action.
 
 ## Install and start
 
