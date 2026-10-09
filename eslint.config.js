@@ -5,6 +5,7 @@ import tseslint from 'typescript-eslint';
 
 const sourceFiles = [
   'index.js',
+  'deployment/**/*.mjs',
   'core/**/*.js',
   'squad-server/**/*.js',
   'scripts/**/*.{js,mjs}',
