@@ -1,6 +1,6 @@
 {
   "name": "SquadJS",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "Thomas Smyth <https://github.com/Thomas-Smyth>",
   "license": "BSL-1.0",
   "private": true,
@@ -43,7 +43,7 @@
     "discord.js": "^14.27.0",
     "sequelize": "^6.37.8",
     "sharp": "^0.35.5",
-    "squad-server": "1.0.0",
+    "squad-server": "1.0.1",
     "ssh2-sftp-client": "^12.1.1"
   },
   "overrides": {
@@ -72,5 +72,5 @@
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.0.0"
   },
-  "description": "SquadXO — Your server’s second-in-command."
+  "description": "SquadXO \u2014 Your server\u2019s second-in-command."
 }

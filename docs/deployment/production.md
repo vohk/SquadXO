@@ -10,10 +10,10 @@ From a clean source checkout:
 npm ci
 npm run lint
 npm test
-npm run package:production -- --version v1.0.0
+npm run package:production -- --version v1.0.1
 ```
 
-This writes `artifacts/squadxo-v1.0.0.tar.gz` and its `.sha256` file. Packaging rebuilds the runtime and checks that config, README and plugin reference match their generators. Regenerate and commit changed source artifacts before packaging: a Git checkout must be clean and have a commit. `BUILD_INFO.json` records the version and source revision; a source tree without `.git` records a null revision for local validation only.
+This writes `artifacts/squadxo-v1.0.1.tar.gz` and its `.sha256` file. Packaging rebuilds the runtime and checks that config, README and plugin reference match their generators. Regenerate and commit changed source artifacts before packaging: a Git checkout must be clean and have a commit. `BUILD_INFO.json` records the version and source revision; a source tree without `.git` records a null revision for local validation only.
 
 The [build workflow](../../.github/workflows/build.yml) validates and retains archives on manual runs. In `vohk/SquadXO`, pushing a `v*` tag that matches `package.json` also publishes the validated archive and checksum as a GitHub release; prerelease versions are marked as prereleases. Other repositories do not publish releases through this workflow. Deployment remains a separate action.
 
@@ -21,8 +21,8 @@ The [build workflow](../../.github/workflows/build.yml) validates and retains ar
 
 Use Node.js 24.x. A production archive is already compiled; build and generation commands apply only to source checkouts.
 
-1. Verify the archive next to its checksum file: `sha256sum --check squadxo-v1.0.0.tar.gz.sha256`. Use the filenames for your downloaded version.
-2. Extract into an empty directory with `tar -xzf squadxo-v1.0.0.tar.gz`, then `cd squadxo`.
+1. Verify the archive next to its checksum file: `sha256sum --check squadxo-v1.0.1.tar.gz.sha256`. Use the filenames for your downloaded version.
+2. Extract into an empty directory with `tar -xzf squadxo-v1.0.1.tar.gz`, then `cd squadxo`.
 3. Copy your existing `config.json` into that root. For a first installation, copy `config.example.json` to `config.json` and configure it before starting.
 4. Install locked production dependencies and start from that root:
 
