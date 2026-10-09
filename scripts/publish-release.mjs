@@ -67,6 +67,7 @@ export async function publishRelease(
       'push',
       '--atomic',
       '--no-follow-tags',
+      `--force-with-lease=refs/heads/main:${BASE_REVISION}`,
       'origin',
       'HEAD:refs/heads/main',
       `refs/tags/${RELEASE_VERSION}:refs/tags/${RELEASE_VERSION}`

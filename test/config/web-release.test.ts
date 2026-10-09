@@ -160,6 +160,7 @@ test('web publication pushes branch and exact tag atomically before publishing s
   await p.run();
   const push = p.commands.find((command) => command.includes('push'))!;
   assert.ok(push.includes('--atomic'));
+  assert.ok(push.includes(`--force-with-lease=refs/heads/main:${base}`));
   assert.ok(push.includes('HEAD:refs/heads/main'));
   assert.ok(push.includes('refs/tags/v1.0.2:refs/tags/v1.0.2'));
   const release = p.commands.at(-1)!;
