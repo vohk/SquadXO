@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version without v (required when publishing)'
+        description: 'Version without v: prepare a version PR branch, or publish after its merge'
         type: string
         required: false
       release:
@@ -66,13 +66,17 @@ jobs:
           REF: ${{ github.ref }}
           REPOSITORY: ${{ github.repository }}
         run: |
-          if [ "$WEB_RELEASE" = true ]; then
+          if [ "$WEB_RELEASE" = true ] || [ -n "$REQUESTED_VERSION" ]; then
             test "$REPOSITORY" = vohk/SquadXO
             test "$REF" = refs/heads/main
-            node scripts/prepare-web-release.mjs "$REQUESTED_VERSION"
-          elif [ -n "$REQUESTED_VERSION" ]; then
-            echo 'A version input requires the release option; validation-only runs use the checked-out version.' >&2
-            exit 1
+            if [ "$WEB_RELEASE" = true ]; then
+              node scripts/release-version.mjs "v$REQUESTED_VERSION"
+            else
+              node scripts/prepare-web-release.mjs "$REQUESTED_VERSION"
+              if [ "$(git rev-parse HEAD)" = "${{ github.sha }}" ]; then
+                echo 'Version is already synchronized on main; no preparation branch is needed.' >> "$GITHUB_STEP_SUMMARY"
+              fi
+            fi
           fi
       - name: Validate version
         id: version
@@ -108,14 +112,51 @@ jobs:
             artifacts/squadxo-${{ steps.version.outputs.version }}.tar.gz.sha256
           if-no-files-found: error
       - name: Preserve validated release commit
-        if: github.event_name == 'workflow_dispatch' && inputs.release && steps.version.outputs.revision != github.sha
+        if: github.event_name == 'workflow_dispatch' && !inputs.release && inputs.version != '' && steps.version.outputs.revision != github.sha
         run: git bundle create "$RUNNER_TEMP/release-source.bundle" HEAD --not "${{ github.sha }}"
       - uses: actions/upload-artifact@v7
-        if: github.event_name == 'workflow_dispatch' && inputs.release && steps.version.outputs.revision != github.sha
+        if: github.event_name == 'workflow_dispatch' && !inputs.release && inputs.version != '' && steps.version.outputs.revision != github.sha
         with:
           name: validated-release-source
           path: ${{ runner.temp }}/release-source.bundle
           if-no-files-found: error
+  prepare-version:
+    if: github.repository == 'vohk/SquadXO' && github.event_name == 'workflow_dispatch' && !inputs.release && inputs.version != '' && needs.validate.outputs.revision != github.sha
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/download-artifact@v8
+        if: needs.validate.outputs.revision != github.sha
+        with:
+          name: validated-release-source
+          path: ${{ runner.temp }}/validated-source
+      - name: Restore validated revision
+        if: needs.validate.outputs.revision != github.sha
+        env:
+          RELEASE_REVISION: ${{ needs.validate.outputs.revision }}
+        run: |
+          git fetch "$RUNNER_TEMP/validated-source/release-source.bundle" HEAD
+          test "$(git rev-parse FETCH_HEAD)" = "$RELEASE_REVISION"
+          git checkout --detach "$RELEASE_REVISION"
+      - name: Push version branch for a maintainer PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          BRANCH="release/$RELEASE_VERSION"
+          gh auth setup-git
+          EXISTING=$(git ls-remote origin "refs/heads/$BRANCH")
+          test -z "$EXISTING" || { echo 'Version branch already exists; review it rather than overwriting it.' >&2; exit 1; }
+          git -c push.followTags=false push --no-follow-tags --force-with-lease="refs/heads/$BRANCH:" origin "HEAD:refs/heads/$BRANCH"
+          echo "Version branch validated. [Open its PR](https://github.com/vohk/SquadXO/compare/main...$BRANCH?expand=1), review and merge it, then rerun on main with the same version and release checked." >> "$GITHUB_STEP_SUMMARY"
   release:
     if: github.repository == 'vohk/SquadXO' && ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.release && github.ref == 'refs/heads/main'))
     needs: validate
@@ -132,19 +173,6 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24.18.0
-      - uses: actions/download-artifact@v8
-        if: github.event_name == 'workflow_dispatch' && needs.validate.outputs.revision != github.sha
-        with:
-          name: validated-release-source
-          path: ${{ runner.temp }}/validated-source
-      - name: Restore validated revision
-        if: github.event_name == 'workflow_dispatch' && needs.validate.outputs.revision != github.sha
-        env:
-          RELEASE_REVISION: ${{ needs.validate.outputs.revision }}
-        run: |
-          git fetch "$RUNNER_TEMP/validated-source/release-source.bundle" HEAD
-          test "$(git rev-parse FETCH_HEAD)" = "$RELEASE_REVISION"
-          git checkout --detach "$RELEASE_REVISION"
       - uses: actions/download-artifact@v8
         with:
           name: squadxo-${{ needs.validate.outputs.version }}

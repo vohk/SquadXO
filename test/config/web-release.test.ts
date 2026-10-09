@@ -40,6 +40,7 @@ async function fixture(run: (root: string) => Promise<void>) {
     await execute('git', ['config', 'user.email', 'release@example.invalid'], { cwd: root });
     await execute('git', ['add', '.'], { cwd: root });
     await execute('git', ['commit', '-qm', 'Fixture'], { cwd: root });
+    await execute(process.execPath, [prepare, '1.0.1'], { cwd: root });
     await run(root);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -111,7 +112,7 @@ test('tag validation rejects an out-of-sync workspace lock version', async () =>
 });
 
 const revision = 'a'.repeat(40);
-const base = 'b'.repeat(40);
+const base = revision;
 async function publication(options: {
   web?: boolean;
   prerelease?: boolean;
@@ -143,25 +144,23 @@ async function publication(options: {
     if (path === 'git/ref/heads/main')
       data = { object: { sha: options.movedMain ? 'd'.repeat(40) : base } };
     if (path?.startsWith('git/tags/'))
-      data = { object: { type: 'commit', sha: options.movedTag ? base : revision } };
+      data = { object: { type: 'commit', sha: options.movedTag ? 'b'.repeat(40) : revision } };
     return new Response(JSON.stringify(data), { status: data ? 200 : 404 });
   }) as typeof fetch;
   const run = async (command: string, args: string[]) => {
     commands.push([command, ...args]);
-    if (args.includes('push') && options.rejectedPush)
-      throw new Error('Branch protection rejected push');
+    if (args.includes('push') && options.rejectedPush) throw new Error('Tag push rejected');
     return { stdout: `${revision}\n` };
   };
   return { commands, run: () => publisher.publishRelease(env, run, request) };
 }
 
-test('web publication pushes branch and exact tag atomically before publishing stable latest', async () => {
+test('web publication only pushes the validated tag before publishing stable latest', async () => {
   const p = await publication({ web: true });
   await p.run();
   const push = p.commands.find((command) => command.includes('push'))!;
-  assert.ok(push.includes('--atomic'));
-  assert.ok(push.includes(`--force-with-lease=refs/heads/main:${base}`));
-  assert.ok(push.includes('HEAD:refs/heads/main'));
+  assert.ok(!push.some((argument) => argument.includes('refs/heads/')));
+  assert.ok(!push.some((argument) => argument.startsWith('--force')));
   assert.ok(push.includes('refs/tags/v1.0.2:refs/tags/v1.0.2'));
   const release = p.commands.at(-1)!;
   assert.deepEqual(release.slice(0, 3), ['gh', 'release', 'create']);
@@ -170,7 +169,7 @@ test('web publication pushes branch and exact tag atomically before publishing s
   assert.ok(release.includes('--latest'));
 });
 
-test('publication refuses duplicate identities, moved main and rejected branch writes', async () => {
+test('publication refuses duplicate identities, moved main and rejected tag writes', async () => {
   for (const options of [
     { duplicateRelease: true },
     { duplicateTag: true },

@@ -60,16 +60,13 @@ export async function publishRelease(
       `SquadXO ${RELEASE_VERSION}`,
       RELEASE_REVISION
     ]);
-    // One atomic push: a rejected branch update must not leave a release tag behind.
+    // Main is PR-protected. Publication only creates the validated release tag.
     await execute('git', [
       '-c',
       'push.followTags=false',
       'push',
-      '--atomic',
       '--no-follow-tags',
-      `--force-with-lease=refs/heads/main:${BASE_REVISION}`,
       'origin',
-      'HEAD:refs/heads/main',
       `refs/tags/${RELEASE_VERSION}:refs/tags/${RELEASE_VERSION}`
     ]);
   } else {
