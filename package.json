@@ -1,0 +1,76 @@
+{
+  "name": "SquadJS",
+  "version": "1.0.0",
+  "author": "Thomas Smyth <https://github.com/Thomas-Smyth>",
+  "license": "BSL-1.0",
+  "private": true,
+  "packageManager": "npm@11.16.0",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "workspaces": [
+    "assets",
+    "core",
+    "squad-server"
+  ],
+  "scripts": {
+    "lint": "npm run lint:eslint && npm run lint:format && npm run typecheck",
+    "lint:eslint": "eslint . --max-warnings 0",
+    "lint:format": "prettier --check src test eslint.config.js",
+    "lint:fix": "eslint . --fix && prettier --write src test eslint.config.js",
+    "typecheck": "tsc --noEmit",
+    "build": "node scripts/build.mjs",
+    "test": "node scripts/run-tests-isolated.mjs",
+    "test:db": "node scripts/run-tests-isolated.mjs dist/test/integration/db-log.test.js",
+    "package:production": "node scripts/build-production-package.mjs",
+    "start:production": "node --unhandled-rejections=warn index.js --config config.json",
+    "start:ts": "npm run build && node index.js",
+    "db:eos-backfill": "node dist/src/database/eos-backfill-cli.js",
+    "format-config": "node dist/src/config/format-config-cli.js",
+    "build-config": "npm run build && node squad-server/scripts/build-config-file.js",
+    "build-readme": "npm run build && node squad-server/scripts/build-readme.js",
+    "build-reference": "npm run build && node squad-server/scripts/build-reference.js",
+    "build-all": "npm run build && node squad-server/scripts/build-config-file.js && node squad-server/scripts/build-readme.js"
+  },
+  "type": "module",
+  "exports": {
+    "./plugin-api": {
+      "types": "./dist/src/plugins/api.d.ts",
+      "default": "./dist/src/plugins/api.js"
+    }
+  },
+  "dependencies": {
+    "discord.js": "^14.27.0",
+    "sequelize": "^6.37.8",
+    "sharp": "^0.35.5",
+    "squad-server": "1.0.0",
+    "ssh2-sftp-client": "^12.1.1"
+  },
+  "overrides": {
+    "engine.io": "6.6.11",
+    "minimatch@3.1.5": {
+      "brace-expansion": "1.1.21"
+    },
+    "socket.io-parser": "4.2.7",
+    "undici": "6.29.0",
+    "uuid": "^11.1.1",
+    "ws": "8.21.3",
+    "moment": "2.31.0"
+  },
+  "allowScripts": {
+    "cpu-features@0.0.10": true,
+    "sqlite3@6.0.1": true,
+    "ssh2@1.17.0": true
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "eslint": "^9.0.0",
+    "eslint-config-prettier": "^10.0.0",
+    "globals": "^16.0.0",
+    "prettier": "^3.0.0",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.0.0"
+  },
+  "description": "SquadXO — Your server’s second-in-command."
+}

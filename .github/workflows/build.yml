@@ -1,0 +1,108 @@
+name: Validate and release SquadXO
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: squadxo-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      revision: ${{ steps.version.outputs.revision }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: squadjs
+          POSTGRES_USER: squadjs
+          POSTGRES_PASSWORD: squadjs-test-only
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U squadjs -d squadjs"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      mariadb:
+        image: mariadb:11.8
+        env:
+          MARIADB_DATABASE: squadjs
+          MARIADB_ROOT_PASSWORD: squadjs-test-only
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DB_TEST_POSTGRES_URL: postgres://squadjs:squadjs-test-only@127.0.0.1:5432/squadjs
+      DB_TEST_MARIADB_URL: mariadb://root:squadjs-test-only@127.0.0.1:3306/squadjs
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.18.0
+          cache: npm
+      - name: Validate version
+        id: version
+        env:
+          EVENT: ${{ github.event_name }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if [ "$EVENT" = push ]; then
+            node scripts/release-version.mjs "$TAG"
+          else
+            VERSION=$(node --input-type=module -e "import p from './package.json' with {type:'json'}; console.log('v'+p.version)")
+            node scripts/release-version.mjs "$VERSION"
+          fi
+      - name: Verify npm toolchain
+        run: test "$(npm --version)" = 11.16.0
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - name: Package tagged source
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: npm run package:production -- --version "$RELEASE_VERSION"
+      - name: Smoke test extracted production package
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_REVISION: ${{ steps.version.outputs.revision }}
+        run: node scripts/smoke-production-package.mjs "artifacts/squadxo-$RELEASE_VERSION.tar.gz" "$RELEASE_VERSION" "$RELEASE_REVISION"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: squadxo-${{ steps.version.outputs.version }}
+          path: |
+            artifacts/squadxo-${{ steps.version.outputs.version }}.tar.gz
+            artifacts/squadxo-${{ steps.version.outputs.version }}.tar.gz.sha256
+          if-no-files-found: error
+  release:
+    if: github.repository == 'vohk/SquadXO' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: squadxo-${{ needs.validate.outputs.version }}
+          path: release-assets
+      - name: Publish validated release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: vohk/SquadXO
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+          PRERELEASE: ${{ needs.validate.outputs.prerelease }}
+        run: |
+          cd release-assets
+          sha256sum --check "squadxo-$RELEASE_VERSION.tar.gz.sha256"
+          FLAGS=()
+          if [ "$PRERELEASE" = true ]; then FLAGS+=(--prerelease --latest=false); fi
+          gh release create "$RELEASE_VERSION" \
+            "squadxo-$RELEASE_VERSION.tar.gz" "squadxo-$RELEASE_VERSION.tar.gz.sha256" \
+            --verify-tag --title "SquadXO $RELEASE_VERSION" --generate-notes "${FLAGS[@]}"

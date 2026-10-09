@@ -1,0 +1,123 @@
+{
+  "server": {
+    "id": 1,
+    "host": "xxx.xxx.xxx.xxx",
+    "rconPort": 21114,
+    "rconPassword": "",
+    "logReaderMode": "tail",
+    "logDir": "C:/path/to/squad/log/folder",
+    "adminLists": [
+      {
+        "type": "",
+        "source": ""
+      }
+    ]
+  },
+  "layers": {
+    "sources": [
+      {
+        "name": "Squad",
+        "url": "https://raw.githubusercontent.com/fantinodavide/SquadLayerList/main/layers.json"
+      },
+      {
+        "name": "Steel Division",
+        "url": "https://raw.githubusercontent.com/fantinodavide/SquadLayerList/main/mods/steel-division/layers.json"
+      },
+      {
+        "name": "King of the Hill",
+        "url": "https://raw.githubusercontent.com/fantinodavide/SquadLayerList/main/mods/koth/layers.json"
+      },
+      {
+        "name": "SuperMod",
+        "url": "https://raw.githubusercontent.com/fantinodavide/SquadLayerList/main/mods/supermod/layers.json"
+      },
+      {
+        "name": "Galactic Contention",
+        "url": "https://raw.githubusercontent.com/Buff-oG/Galactic-Contention-Layer-Scrape/refs/heads/main/Scrape/gc.json"
+      }
+    ]
+  },
+  "connectors": {
+    "discord": "",
+    "mysql": {
+      "host": "host",
+      "port": 3306,
+      "username": "squadjs",
+      "password": "",
+      "database": "squadjs",
+      "dialect": "mysql"
+    },
+    "postgres": {
+      "host": "localhost",
+      "port": 5432,
+      "username": "squadjs",
+      "password": "",
+      "database": "squadjs",
+      "schema": "squad",
+      "dialect": "postgres"
+    },
+    "sqlite": "sqlite:database.sqlite"
+  },
+  "plugins": [
+    {
+      "type": "native",
+      "name": "discordOperations",
+      "module": "./dist/src/plugins/builtin/discord-operations.js",
+      "enabled": false,
+      "connectors": {
+        "discord": "discord"
+      }
+    },
+    {
+      "type": "native",
+      "name": "discordRoundEnded",
+      "module": "./dist/src/plugins/builtin/discord-round-ended.js",
+      "enabled": false,
+      "connectors": {
+        "discord": "discord"
+      }
+    },
+    {
+      "type": "native",
+      "name": "errorNotify",
+      "module": "./dist/src/plugins/builtin/error-notify.js",
+      "enabled": false,
+      "connectors": {
+        "discord": "discord"
+      }
+    },
+    {
+      "type": "native",
+      "name": "logGrabber",
+      "module": "./dist/src/plugins/builtin/log-grabber.js",
+      "enabled": false,
+      "connectors": {
+        "discord": "discord"
+      }
+    },
+    {
+      "plugin": "DBLog",
+      "enabled": false,
+      "database": "sqlite"
+    },
+    {
+      "plugin": "SmartSwitch",
+      "enabled": true,
+      "database": "sqlite"
+    },
+    {
+      "plugin": "PlayerStateTracker",
+      "enabled": false,
+      "database": "sqlite"
+    },
+    {
+      "plugin": "DiscordServerStatus",
+      "enabled": true,
+      "messageStore": "sqlite"
+    }
+  ],
+  "configManagement": {
+    "reorderOnStartup": true,
+    "sortPlugins": true
+  }
+}
