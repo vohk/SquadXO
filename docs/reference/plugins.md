@@ -444,6 +444,17 @@ Generated enabled default: `true`.
 | `channelID` | yes | — | `` | The ID of the channel to log admin broadcasts to. |
 
 
+## SmartSwitch behavior
+
+[SmartSwitch options](#smartswitch) control requests, queues and automatic balancing.
+
+- Automatic shuffling and balancing keep parties together, even across squads. A party that cannot fit can leave a residual imbalance.
+- An ordinary member's explicit request is individual. A leader's request includes the entire party and checks the projected team gap before moving anyone.
+- Failed queues and partial shuffle destinations are retained. Overlapping queued players and squads are deduplicated; cooldowns are recorded only for observed moves.
+- The queue table's nullable `targetTeamID` column is added by an idempotent migration. Queue destinations persist across retries and restarts; in-memory squad and shuffle plans last only for the plugin instance.
+
+Whole-party moves use the roster's `isLeader` flag as the party-leader signal. See the [shared team-switch contract](../contracts/legacy-plugin-compatibility.md#party-aware-team-changes) for roster validation and command verification.
+
 ## Native plugins
 
 Module paths below are for the compiled runtime. Option defaults come from each definition; connector aliases map to keys in your main config. No plugin is created or mounted during generation.

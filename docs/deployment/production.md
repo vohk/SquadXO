@@ -13,7 +13,11 @@ npm test
 npm run package:production -- --version v1.0.1
 ```
 
-This writes `artifacts/squadxo-v1.0.1.tar.gz` and its `.sha256` file. Packaging rebuilds the runtime and checks that config, README and plugin reference match their generators. Regenerate and commit changed source artifacts before packaging: a Git checkout must be clean and have a commit. `BUILD_INFO.json` records the version and source revision; a source tree without `.git` records a null revision for local validation only.
+This writes `artifacts/squadxo-v1.0.1.tar.gz` and its `.sha256` file. Packaging rebuilds the runtime and checks that config, README and plugin reference match their generators.
+
+Regenerate and commit changed source artifacts before packaging: a Git checkout must be clean and have a commit.
+
+`BUILD_INFO.json` records the version and source revision; a source tree without `.git` records a null revision for local validation only.
 
 The [build workflow](../../.github/workflows/build.yml) validates and retains archives on manual runs. In `vohk/SquadXO`, pushing a `v*` tag that matches `package.json` also publishes the validated archive and checksum as a GitHub release; prerelease versions are marked as prereleases. Other repositories do not publish releases through this workflow. Deployment remains a separate action.
 
@@ -33,17 +37,26 @@ node --unhandled-rejections=warn index.js
 
 Keep production `config.json` beside `index.js` and run startup commands from that application root. Native and external legacy module paths resolve relative to `config.json`; relative log and SQLite paths resolve from the process working directory.
 
-Set `server.id`, RCON host/port/password and log access for the target server. In local `tail`/`local` mode, `server.logDir` is the directory containing `SquadGame.log`, not the file itself; the process needs permission to read it. For separate hosts, configure `sftp` and `server.sftp`. RCON and SFTP passwords may come from `SQUADJS_RCON_PASSWORD` and `SQUADJS_SFTP_PASSWORD`.
+Configure the server connection:
 
-Review every enabled plugin. Legacy defaults include enabled administration and Discord plugins; the example is not a ready-to-run operational config. Fill required options, Discord bot token and target channels, or disable entries you do not intend to use. Discord tokens may come from `SQUADJS_DISCORD_TOKEN`. Configure the bot’s Message Content and Server Members intents in Discord’s developer portal to match the runtime. Missing required options, unavailable connectors or invalid native definitions can stop startup. Review automatic team-switching settings before enabling them on your server.
+- Set `server.id`, RCON host/port/password and log access for the target server.
+- In `tail`/`local` mode, `server.logDir` is the directory containing `SquadGame.log`, not the file itself; the process needs permission to read it.
+- For separate hosts, configure `sftp` and `server.sftp`.
+- RCON and SFTP passwords may come from `SQUADJS_RCON_PASSWORD` and `SQUADJS_SFTP_PASSWORD`.
 
-Keep credentials out of Git and release archives. The example enables config key reordering and plugin sorting at startup; set `configManagement.reorderOnStartup` to `false` if a configuration-management system owns the file’s layout.
+Review enabled plugins. Legacy defaults include enabled administration and Discord plugins; the example requires configuration before use.
 
-A supervisor such as Pterodactyl manages restart policy, config injection and release replacement. Preserve SQLite files, logs, external plugins and `data/native-plugins/` across replacements. Verify RCON state/roster refresh, new log events and enabled plugin output after first startup; keep the previous release until that operator check passes.
+- Fill required options, Discord bot token and target channels, or disable entries you do not intend to use.
+- Discord tokens may come from `SQUADJS_DISCORD_TOKEN`. Configure the bot’s Message Content and Server Members intents in Discord’s developer portal to match the runtime.
+- Missing required options, unavailable connectors or invalid native definitions can stop startup.
+
+The example enables config key reordering and plugin sorting at startup; set `configManagement.reorderOnStartup` to `false` if a configuration-management system owns the file’s layout.
 
 ## Database migration
 
-DBLog is optional and disabled in the example. When enabled, initialization creates or adopts its schema before plugins mount. The version-1 migration preserves `DBLog_*` names and Steam-valued columns, adds nullable EOS fields and repairs incomplete match display metadata. New writes record EOS IDs even while historical backfill is disabled. See the [DBLog schema contract](../contracts/db-log-schema.md) for exact columns, identity reconciliation and repair behavior.
+DBLog is optional and disabled in the example. When enabled, initialization creates or adopts its schema before plugins mount.
+
+The version-1 migration preserves `DBLog_*` names and Steam-valued columns, adds nullable EOS fields and repairs incomplete match display metadata. New writes record EOS IDs even while historical backfill is disabled. See the [DBLog schema contract](../contracts/db-log-schema.md) for exact columns, identity reconciliation and repair behavior.
 
 For an existing shared database:
 
@@ -75,7 +88,7 @@ DBLog’s `eosBackfill` defaults to `off`:
 - `blocking` finishes before plugins mount and permits blocking index creation. Use a maintenance window.
 - `batchSize` sets rows’ primary-key range per transaction; `pauseMs` delays between batches. `runForMinutes: 0` runs until completion or shutdown; a positive value pauses after that duration.
 
-Select one instance to run backfill. Progress is checkpointed in `DBLog_Metadata`; shutdown or failure can resume from the committed cursor. A database lease prevents concurrent backfill workers. Monitor free storage and database load; EOS history remains incomplete until completion.
+Select one instance to run backfill. Progress is checkpointed in `DBLog_Metadata`; shutdown or failure can resume from the committed cursor. A database lease prevents concurrent backfill workers.
 
 To run the worker separately from the game-connected runtime:
 
@@ -84,7 +97,7 @@ node dist/src/database/eos-backfill-cli.js --config config.json --mode backgroun
   --batch-size 5000 --pause-ms 500 --run-for-minutes 0
 ```
 
-It selects the enabled DBLog connector unless `--connector <name>` is supplied. `SIGINT`/`SIGTERM` pauses after the current statement and committed cursor. Legacy Steam-based consumers remain compatible. Match metadata repair does not replay events to external subscribers: if their cursor passed previously excluded matches, arrange an idempotent replay in that consumer after repair.
+It selects the enabled DBLog connector unless `--connector <name>` is supplied. `SIGINT`/`SIGTERM` pauses after the current statement and committed cursor. Legacy Steam-based consumers remain compatible.
 
 ## Rollback
 
@@ -94,12 +107,12 @@ The version-1 database migration is additive. Do not restore a database merely t
 
 ## Configuration and connectors
 
-The example uses the persistent local SQLite file `database.sqlite`. SQLite is a lightweight single-instance option; PostgreSQL, MariaDB or MySQL is preferred for production, shared databases and multiple writers. Keep SQLite’s path writable and persistent, back it up, and use an absolute path if release directories change.
+The example uses the persistent local SQLite file `database.sqlite`. SQLite is a lightweight single-instance option; PostgreSQL, MariaDB or MySQL is preferred for production, shared databases and multiple writers.
 
-Enable DBLog when you need its history, and select the same connector alias in consumers such as SmartSwitch. AltChecker and PteroMonitor use DBLog’s connector automatically. PlayerStateTracker and DiscordServerStatus’s message store can use separate connectors when they do not need that shared history. There is no automatic fallback from a failed database.
+Enable DBLog when you need its history, and select the same connector alias in consumers such as SmartSwitch. AltChecker and PteroMonitor use DBLog’s connector automatically. PlayerStateTracker and DiscordServerStatus’s message store can use separate connectors when they do not need that shared history.
 
-See [Database connectors](../contracts/database-connectors.md) for examples and [Configuration and plugin reference](../reference/plugins.md) for plugin options. Add local/native modules following the [Native plugin contract](../contracts/native-plugin-authoring.md) or [Legacy external-module contract](../contracts/legacy-plugin-compatibility.md#external-modules); keep external code and its dependencies outside the replaceable release tree. Do not enable duplicate handlers for the same notification or command.
+There is no automatic fallback from a failed database.
 
-## Team changes
+See [Database connectors](../contracts/database-connectors.md) for examples and [Configuration and plugin reference](../reference/plugins.md) for plugin options.
 
-Read [legacy compatibility](../contracts/legacy-plugin-compatibility.md#party-aware-team-changes) before enabling automatic switching; party constraints can leave a residual imbalance.
+Add local/native modules following the [Native plugin contract](../contracts/native-plugin-authoring.md) or [Legacy external-module contract](../contracts/legacy-plugin-compatibility.md#external-modules).
