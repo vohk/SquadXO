@@ -91,12 +91,12 @@ test('logGrabber registers one command, authorizes requests, uploads gzip, and c
   const successful = interaction(discord.commandID, {
     roles: ['staff'],
     editReply: async (response) => {
-      edits.push(response);
       const file = (response as { files: { attachment: string }[] }).files[0];
       if (file) {
         uploadedPath = file.attachment;
         uploaded = await readFile(file.attachment);
       }
+      edits.push(response);
     }
   });
   discord.emit('interactionCreate', successful);
