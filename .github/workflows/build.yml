@@ -19,16 +19,20 @@ concurrency:
   cancel-in-progress: false
 jobs:
   validate:
+    if: github.event_name == 'push' || inputs.release == true
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
-      version: ${{ steps.version.outputs.version }}
-      revision: ${{ steps.version.outputs.revision }}
-      prerelease: ${{ steps.version.outputs.prerelease }}
-      previous: ${{ steps.baseline.outputs.previous }}
+      version: ${{ steps.package.outputs.version }}
+      revision: ${{ steps.package.outputs.revision }}
+      prerelease: ${{ steps.package.outputs.prerelease }}
+      previous: ${{ steps.package.outputs.previous }}
     services:
       postgres:
         image: postgres:18
+        credentials:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
         env:
           POSTGRES_DB: squadjs
           POSTGRES_USER: squadjs
@@ -39,6 +43,9 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 10
       mariadb:
         image: mariadb:11.8
+        credentials:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
         env:
           MARIADB_DATABASE: squadjs
           MARIADB_ROOT_PASSWORD: squadjs-test-only
@@ -55,76 +62,23 @@ jobs:
           persist-credentials: false
           ref: ${{ github.sha }}
           fetch-depth: 0
-      - uses: actions/setup-node@v6
+      - uses: ./.github/actions/package-validation
+        id: package
         with:
-          node-version: 24.18.0
-          cache: npm
-      - name: Prepare web release version
-        if: github.event_name == 'workflow_dispatch'
-        env:
-          WEB_RELEASE: ${{ inputs.release }}
-          REQUESTED_VERSION: ${{ inputs.version }}
-          REF: ${{ github.ref }}
-          REPOSITORY: ${{ github.repository }}
-        run: |
-          if [ "$WEB_RELEASE" = true ]; then
-            test "$REPOSITORY" = vohk/SquadXO
-            test "$REF" = refs/heads/main
-            test -n "$REQUESTED_VERSION" || { echo 'A release requires a version.' >&2; exit 1; }
-          fi
-          if [ -n "$REQUESTED_VERSION" ]; then
-            node scripts/prepare-web-release.mjs "$REQUESTED_VERSION"
-          fi
-      - name: Validate version
-        id: version
-        env:
-          EVENT: ${{ github.event_name }}
-          TAG: ${{ github.ref_name }}
-        run: |
-          if [ "$EVENT" = push ]; then
-            node scripts/release-version.mjs "$TAG"
-          else
-            VERSION=$(node --input-type=module -e "import p from './package.json' with {type:'json'}; console.log('v'+p.version)")
-            node scripts/release-version.mjs "$VERSION"
-          fi
-      - name: Pin previous stable release for generated notes
-        id: baseline
-        if: github.repository == 'vohk/SquadXO'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: vohk/SquadXO
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
-        run: node scripts/release-baseline.mjs
-      - name: Verify npm toolchain
-        run: test "$(npm --version)" = 11.16.0
-      - run: npm ci
-      - run: npm run lint
-      - run: npm test
-      - name: Package validated source
-        env:
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
-        run: npm run package:production -- --version "$RELEASE_VERSION"
-      - name: Smoke test extracted production package
-        env:
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
-          RELEASE_REVISION: ${{ steps.version.outputs.revision }}
-        run: node scripts/smoke-production-package.mjs "artifacts/squadxo-$RELEASE_VERSION.tar.gz" "$RELEASE_VERSION" "$RELEASE_REVISION"
-      - uses: actions/upload-artifact@v7
+          full-tests: 'true'
+  preview:
+    if: github.event_name == 'workflow_dispatch' && inputs.release != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
         with:
-          name: squadxo-${{ steps.version.outputs.version }}
-          path: |
-            artifacts/squadxo-${{ steps.version.outputs.version }}.tar.gz
-            artifacts/squadxo-${{ steps.version.outputs.version }}.tar.gz.sha256
-          if-no-files-found: error
-      - name: Preserve validated release commit
-        if: github.event_name == 'workflow_dispatch' && steps.version.outputs.revision != github.sha
-        run: git bundle create "$RUNNER_TEMP/release-source.bundle" HEAD --not "${{ github.sha }}"
-      - uses: actions/upload-artifact@v7
-        if: github.event_name == 'workflow_dispatch' && steps.version.outputs.revision != github.sha
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: ./.github/actions/package-validation
         with:
-          name: validated-release-source
-          path: ${{ runner.temp }}/release-source.bundle
-          if-no-files-found: error
+          full-tests: 'false'
   release:
     if: github.repository == 'vohk/SquadXO' && ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.release && github.ref == 'refs/heads/main'))
     needs: validate
