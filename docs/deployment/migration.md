@@ -13,11 +13,18 @@ SquadXO uses a TypeScript runtime with compatibility support for maintained lega
 
 EOS IDs are the canonical live identity. Steam IDs are optional compatibility metadata, so plugins must not assume that every player has one. Log events can also lack a resolvable participant; see [legacy compatibility](../contracts/legacy-plugin-compatibility.md).
 
-DBLog keeps its `DBLog_*` table names and Steam columns for existing SQL consumers. Its additive, idempotent structural migration adds EOS support; it does not scan all historical event rows at startup. Historical EOS backfill defaults to `off` and is enabled separately. Review the [schema contract](../contracts/db-log-schema.md) and database backup/rollback instructions before changing a shared database. Do not restore an old database merely to roll back the application.
+### Database schema migration
 
-The old `ServerProfiler` alias is removed; select `unnServerProfiler` and preserve explicit options. Re-check chart/compression defaults if you relied on the alias's defaults. `DiscordIPDetection` is removed without a replacement. Plugins that call `restartRCON()` or `restartLogParser()` must migrate; the runtime owns those components and does not supply fake successful restart methods.
+**On first startup with DBLog enabled, SquadXO migrates an unversioned DBLog database before plugins mount.** SquadXO’s core DBLog creates or adopts schema version 1 before plugins mount. It records the version in `DBLog_Metadata`, makes `DBLog_Players.steamID` nullable where needed, and adds `attackerEOSID`/`victimEOSID` to combat tables plus `reviverEOSID` to revives. Existing `DBLog_*` names and Steam-valued participant columns keep their meaning; new events can identify players by EOS even when Steam metadata is unavailable. Review Steam-only joins and dashboards that would omit those participants.
 
-The public release removes `autoProfiler`, `ConsecutiveWinsRandomizer`, `DiscordAdminRequest`, legacy `DiscordRoundEnded` and `PersistentEOSIDtoSteamID`. Remove those entries from existing configs; use `SmartSwitch`, `unnAdminRequest` and native `discordRoundEnded` where needed. Enable DBLog for persistent EOS/Steam associations in `DBLog_Players`. Existing `EOS_SteamIDtoEOSIDs` tables and records are preserved but no longer updated by the public runtime; external SQL consumers must migrate.
+Back up the database and use one writer for the first structural migration. Historical EOS backfill defaults to `off`: new writes include EOS IDs, while older combat rows need the separate resumable backfill to populate their EOS columns. Follow the [database migration procedure](production.md#database-migration) and [schema contract](../contracts/db-log-schema.md) before starting against existing data. Application rollback does not undo the schema changes; [database restoration](production.md#rollback) is a separate recovery decision because restoring a backup discards newer rows.
+
+### Upstream plugin replacements
+
+For installations using these plugins from [upstream SquadJS](https://github.com/Team-Silver-Sphere/SquadJS/tree/7c86ab71fee1427093672100af912af230d4fa5d/squad-server/plugins):
+
+- Replace `DiscordAdminRequest` with `unnAdminRequest`, which creates a Discord request thread and relays messages until the request is closed. Review its options in the [plugin reference](../reference/plugins.md#unnadminrequest).
+- Replace `DiscordRoundEnded` with native `discordRoundEnded`. Its configuration uses `type: "native"`, a module, named connectors and nested `options`, including `channelIDs` rather than a single `channelID`; see the [plugin reference](../reference/plugins.md#discordroundended).
 
 Legacy entries retain their IDs and top-level options. Native entries use versioned definitions, connector aliases and nested options; module paths resolve relative to the config file. Disable a legacy handler before enabling a native replacement for the same notification or command. See the [native authoring contract](../contracts/native-plugin-authoring.md) for local and managed modules.
 

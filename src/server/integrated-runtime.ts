@@ -409,7 +409,7 @@ export class IntegratedRuntime {
       serverName:
         typeof configuredName === 'string'
           ? configuredName
-          : `SquadJS Server ${this.config.server.id}`,
+          : `SquadXO Server ${this.config.server.id}`,
       onWriteError: () => {
         this.#dbErrorCount += 1;
       },

@@ -6,7 +6,7 @@ export default definePlugin({
   options: {
     response: {
       type: 'string',
-      default: 'A native SquadJS plugin received your command.',
+      default: 'A native SquadXO plugin received your command.',
       description: 'Message sent to the player through the owned RCON client.'
     }
   },

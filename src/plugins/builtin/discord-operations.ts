@@ -266,7 +266,7 @@ async function handleInteraction(
       guildID: interaction.guildId,
       error: error instanceof Error ? error.message : String(error)
     });
-    const content = 'Could not manage application commands. Check the SquadJS console.';
+    const content = 'Could not manage application commands. Check the SquadXO console.';
     if (interaction.deferred || interaction.replied) await interaction.editReply(content);
     else await interaction.reply({ content, flags: MessageFlags.Ephemeral });
   }

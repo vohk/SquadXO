@@ -218,7 +218,7 @@ async function notify(
   try {
     let attachment: LogAttachment | undefined;
     if (context.options.attachLog) {
-      directory = await mkdtemp(join(tmpdir(), 'squadjs-error-notify-'));
+      directory = await mkdtemp(join(tmpdir(), 'squadxo-error-notify-'));
       attachment = await captureLog(context, directory, match.detectedAt);
     }
     const roleIDs = context.options.mentionRoleIDs;
@@ -324,7 +324,7 @@ async function captureLog(
       status: 'unavailable',
       reason: message.startsWith('Squad log is ')
         ? 'The server log exceeds the configured maximumSourceBytes limit.'
-        : 'The server log could not be captured. Check the SquadJS console for details.'
+        : 'The server log could not be captured. Check the SquadXO console for details.'
     };
   }
 }

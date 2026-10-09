@@ -40,7 +40,7 @@ export interface PluginLogs {
   copyCurrent(destination: string, options: PluginLogSnapshotOptions): Promise<PluginLogSnapshot>;
 }
 
-/** Identity of the SquadJS instance from `config.server`. */
+/** Identity of the SquadXO instance from `config.server`. */
 export interface PluginServerIdentity {
   readonly id: number;
   readonly name?: string;

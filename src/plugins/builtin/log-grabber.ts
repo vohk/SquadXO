@@ -185,7 +185,7 @@ async function handleInteraction(
     } else {
       await interaction.deferReply();
     }
-    directory = await mkdtemp(join(tmpdir(), 'squadjs-log-grabber-'));
+    directory = await mkdtemp(join(tmpdir(), 'squadxo-log-grabber-'));
     const snapshotPath = join(directory, 'SquadGame.log');
     const snapshot = await context.logs.copyCurrent(snapshotPath, {
       maximumBytes: context.options.maximumSourceBytes
@@ -276,7 +276,7 @@ async function replyWithFailure(
   interaction: ChatInputCommandInteraction,
   error: unknown
 ): Promise<void> {
-  let content = 'Could not capture the Squad server log. Check the SquadJS console for details.';
+  let content = 'Could not capture the Squad server log. Check the SquadXO console for details.';
   if (error instanceof AttachmentTooLargeError) {
     content = `The compressed log is ${formatBytes(error.actual)} and exceeds Discord's ${formatBytes(
       error.maximum
