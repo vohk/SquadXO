@@ -29,4 +29,6 @@ Edit generated documentation and config through `squad-server/templates/` and pl
 
 When adding or removing runtime TypeScript or legacy plugin/layer JavaScript, review [scripts/package-inputs.json](scripts/package-inputs.json); packaging requires exact inventory equality. See [Deployment](docs/deployment/production.md) for release checks and the production layout: `config.json` beside `index.js`, with startup from the application root.
 
-Pull requests run **PR validation** on GitHub-hosted runners with lint, types, a clean build and full tests including PostgreSQL and MariaDB. The check runs for every PR, including documentation changes; it does not package or publish releases.
+Pull requests always report **PR validation**. Explicit documentation-only changes run lint, types and generated-artifact parity without database services; runtime, configuration, workflow and unknown paths run the full suite with PostgreSQL and MariaDB. Mixed changes use the full route.
+
+Manual release previews validate, package and smoke the archive without repeating the full database suite. Tag releases and publishing dispatches always run full database validation before publication. Database jobs use the existing `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets for image pulls; absent secrets leave pulls anonymous.

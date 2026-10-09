@@ -7,13 +7,56 @@ concurrency:
   group: squadxo-pr-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 jobs:
-  validate:
-    name: PR validation
+  route:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      documentation_only: ${{ steps.route.outputs.documentation_only }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.18.0
+      - id: route
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/pr-validation-route.mjs --diff "$BASE_SHA" "$HEAD_SHA"
+  documentation:
+    name: Documentation validation
+    needs: route
+    if: needs.route.outputs.documentation_only == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.18.0
+          cache: npm
+      - name: Verify npm toolchain
+        run: test "$(npm --version)" = 11.16.0
+      - run: npm ci
+      - run: npm run lint
+      - name: Verify generated documentation and config
+        run: node scripts/run-tests-isolated.mjs dist/test/config/generated-artifacts.test.js
+  full:
+    name: Full database validation
+    needs: route
+    if: needs.route.outputs.documentation_only == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
       postgres:
         image: postgres:18
+        credentials:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
         env:
           POSTGRES_DB: squadjs
           POSTGRES_USER: squadjs
@@ -24,6 +67,9 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 10
       mariadb:
         image: mariadb:11.8
+        credentials:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
         env:
           MARIADB_DATABASE: squadjs
           MARIADB_ROOT_PASSWORD: squadjs-test-only
@@ -49,3 +95,23 @@ jobs:
         run: npm run lint
       - name: Build and full tests
         run: npm test
+  validate:
+    name: PR validation
+    if: always()
+    needs: [route, documentation, full]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.18.0
+      - name: Require the selected validation to succeed
+        env:
+          ROUTE: ${{ needs.route.outputs.documentation_only }}
+          ROUTE_RESULT: ${{ needs.route.result }}
+          DOCS_RESULT: ${{ needs.documentation.result }}
+          FULL_RESULT: ${{ needs.full.result }}
+        run: node scripts/pr-validation-route.mjs --result "$ROUTE" "$ROUTE_RESULT" "$DOCS_RESULT" "$FULL_RESULT"

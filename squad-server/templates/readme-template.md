@@ -35,6 +35,8 @@ node --unhandled-rejections=warn index.js
 
 Local log tailing is preferred; SFTP is supported for separate hosts. See [Deployment](docs/deployment/production.md), [Configuration and plugin reference](docs/reference/plugins.md) and the [Native plugin API](docs/contracts/native-plugin-authoring.md).
 
+Deployment templates: [Pterodactyl, Pelican, WISP, AMP and Docker](https://github.com/vohk/SquadXO/tree/main/deployment).
+
 ## Source checkout
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for code conventions, tests and generator commands.

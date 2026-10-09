@@ -1,0 +1,35 @@
+[
+  {
+    "DisplayName": "Public GitHub repository",
+    "Category": "SquadXO",
+    "Description": "Applied by Update; config.json is never rewritten.",
+    "FieldName": "Repository",
+    "InputType": "text",
+    "ParamFieldName": "Repository",
+    "IncludeInCommandLine": false,
+    "DefaultValue": "vohk/SquadXO",
+    "EnumValues": {}
+  },
+  {
+    "DisplayName": "Release tag",
+    "Category": "SquadXO",
+    "Description": "Applied by Update; config.json is never rewritten.",
+    "FieldName": "ReleaseTag",
+    "InputType": "text",
+    "ParamFieldName": "ReleaseTag",
+    "IncludeInCommandLine": false,
+    "DefaultValue": "latest",
+    "EnumValues": {}
+  },
+  {
+    "DisplayName": "Absolute Node.js 24 executable",
+    "Category": "SquadXO",
+    "Description": "Node.js 24 and its npm must be installed in the instance environment. Update and startup use this same executable.",
+    "FieldName": "NodeExecutable",
+    "InputType": "text",
+    "ParamFieldName": "NodeExecutable",
+    "IncludeInCommandLine": false,
+    "DefaultValue": "/usr/bin/node",
+    "EnumValues": {}
+  }
+]

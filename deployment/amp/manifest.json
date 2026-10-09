@@ -1,0 +1,9 @@
+{
+  "id": "632c21b7-5d16-4ebc-a3a5-195f25253982",
+  "authors": ["SquadXO contributors"],
+  "origin": "https://github.com/vohk/SquadXO.git",
+  "url": "https://github.com/vohk/SquadXO/tree/main/deployment/amp",
+  "imagefile": "",
+  "prefix": "",
+  "repotype": "AppTemplates"
+}
