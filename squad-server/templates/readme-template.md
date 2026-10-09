@@ -15,6 +15,7 @@ SquadXO connects to a Squad dedicated server through RCON and `SquadGame.log`, m
 
 > [!NOTE]
 > SquadXO has been my personal project to maintain The Unnamed's SquadJS ecosystem and learn a little bit about the guts at the same time. It is unashamedly AI-developed, although hopefully exercised enough to avoid being slop. We’ve been using it in production for 3 months as of the v1.0.0 release.
+
 > [!WARNING]
 >
 > SquadXO is *almost* a drop in replacement for a standard SquadJS installation, but there are some important caveats:
