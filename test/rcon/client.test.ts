@@ -1,8 +1,21 @@
-import { partiesResponse } from './fixtures/patch-rcon.js';
+import { playersResponse, squadsResponse, partiesResponse } from './fixtures/patch-rcon.js';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { createServer, type Server, type Socket } from 'node:net';
 import test from 'node:test';
+import { mkdtemp, readdir, readFile, rm, open, unlink, type FileHandle } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { gunzipSync } from 'node:zlib';
+import { LegacyServerHost } from '../../src/compatibility/legacy-server-facade.js';
+import { ConnectorRegistry } from '../../src/connectors/registry.js';
+import type { RconAuditEvent } from '../../src/domain/events.js';
+import { asEOSID } from '../../src/domain/identity.js';
+import { ServerState } from '../../src/domain/server-state.js';
+import type { PluginRcon, ResolvedNativeOptions } from '../../src/plugins/api.js';
+import { PluginRuntime } from '../../src/plugins/runtime.js';
+import recorderDefinition from '../../src/plugins/builtin/rcon-recorder.js';
+import { StateRefresher } from '../../src/server/state-refresher.js';
 import {
   RCON_PACKET,
   RconPacketDecoder,
@@ -368,5 +381,268 @@ test('ListParties client method reads and parses populated party responses on de
   } finally {
     await client.stop();
     await fake.close();
+  }
+});
+
+function recorderOptions(
+  directory: string,
+  overrides: Partial<ResolvedNativeOptions<typeof recorderDefinition.options>> = {}
+) {
+  return {
+    ...Object.fromEntries(
+      Object.entries(recorderDefinition.options).map(([name, option]) => [name, option.default])
+    ),
+    directory,
+    ...overrides
+  } as ResolvedNativeOptions<typeof recorderDefinition.options>;
+}
+
+async function recordingEntries(directory: string): Promise<Record<string, unknown>[]> {
+  const result: Record<string, unknown>[] = [];
+  for (const file of await readdir(directory)) {
+    if (!file.endsWith('.jsonl') && !file.endsWith('.gz')) continue;
+    const data = await readFile(join(directory, file));
+    const text = file.endsWith('.gz') ? gunzipSync(data).toString('utf8') : data.toString('utf8');
+    result.push(
+      ...text
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line))
+    );
+  }
+  return result;
+}
+
+test('audit covers completion/errors once, excludes authentication, redacts the password, and isolates faulty observers', async (context) => {
+  context.mock.timers.enable({ apis: ['Date'], now: Date.UTC(2026, 9, 10, 10, 59, 59) });
+  const fake = new FakeRconServer();
+  const port = await fake.listen();
+  const password = 'transport-authentication-fixture';
+  const client = new RconClient({
+    host: '127.0.0.1',
+    port,
+    password,
+    autoReconnect: false,
+    commandAllowed: (command) => command !== 'blocked'
+  });
+  const audits: RconAuditEvent[] = [];
+  const removeFault = client.subscribeAudit(() => {
+    throw new Error('observer fault');
+  });
+  const removeAudit = client.subscribeAudit((event) => audits.push(event));
+  try {
+    await assert.rejects(client.execute('not-ready'), /not ready/);
+    await client.connect();
+    assert.equal(audits.filter((event) => event.type === 'push').length, 0); // auth packets are excluded
+    fake.once('command', () => context.mock.timers.tick(2000));
+    assert.equal(await client.execute('across-hour'), 'chunk one chunk two');
+    fake.responses.set('echo', password);
+    assert.equal(await client.execute('echo'), password); // audit redaction never changes the actual response
+    await assert.rejects(client.execute('blocked'), /blocked/);
+    await assert.rejects(client.execute(''), /empty/);
+    fake.mode = 'silent';
+    const active = client.execute('active');
+    const queued = client.execute('queued');
+    const pending = Promise.allSettled([active, queued]);
+    await client.stop();
+    await pending;
+    const commands = audits.filter((event) => event.type === 'command');
+    assert.equal(commands.length, 7);
+    assert.equal(new Set(commands.map((event) => event.requestID)).size, 7);
+    assert.equal(commands.filter((event) => event.outcome === 'error').length, 5);
+    const cross = commands.find((event) => event.command === 'across-hour')!;
+    assert.equal(cross.requestedAt.toISOString(), '2026-10-10T10:59:59.000Z');
+    assert.equal(cross.time.toISOString(), '2026-10-10T11:00:01.000Z');
+    assert.equal(cross.response, 'chunk one chunk two');
+    assert.ok(commands.find((event) => event.command === 'active')?.sentAt);
+    assert.equal(commands.find((event) => event.command === 'queued')?.sentAt, undefined);
+    assert.ok(!JSON.stringify(audits).includes(password));
+    assert.equal(commands.find((event) => event.command === 'echo')?.response, '[REDACTED]');
+    removeFault();
+    removeAudit();
+    const count = audits.length;
+    await assert.rejects(client.execute('after-unsubscribe'), /not ready/);
+    assert.equal(audits.length, count);
+  } finally {
+    removeFault();
+    removeAudit();
+    await client.stop();
+    await fake.close();
+  }
+});
+
+test('native recorder captures runtime polling, native/legacy helpers and pushes without extra queries; raw lines are opt-in', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'squadxo-shared-recorder-'));
+  const fake = new FakeRconServer();
+  const port = await fake.listen();
+  const client = new SquadRconClient({
+    host: '127.0.0.1',
+    port,
+    password: 'transport-only-fixture',
+    autoReconnect: false
+  });
+  const state = new ServerState();
+  const events = new LegacyServerHost({ state, rcon: client });
+  const failures: unknown[] = [];
+  const runtime = new PluginRuntime({
+    state,
+    rcon: client,
+    events,
+    connectors: new ConnectorRegistry(),
+    onFailure: (failure) => failures.push(failure)
+  });
+  let native!: PluginRcon;
+  try {
+    await runtime.mount('rconRecorder', recorderDefinition.create(), recorderOptions(directory));
+    await runtime.mount('actor', {
+      mount(context) {
+        native = context.rcon;
+      }
+    });
+    await client.connect();
+    assert.equal(fake.commandCounts.size, 0);
+    assert.deepEqual(await readdir(directory), []);
+    events.emit('RAW_LOG_LINE', 'sensitive raw line excluded by default');
+    const eos = asEOSID('00000000000000000000000000000001');
+    fake.responses.set('ListPlayers', playersResponse.replace(/ steam: \d{17}/g, ''));
+    fake.responses.set('ListSquads', squadsResponse);
+    fake.responses.set(
+      'ShowCurrentMap',
+      'Current level is Fallujah, layer is Fallujah_RAAS_v1, factions USA INS'
+    );
+    fake.responses.set('ShowNextMap', 'Next level is Fallujah, layer is To be voted, factions  ');
+    fake.responses.set(
+      'ShowServerInfo',
+      JSON.stringify({ ServerName_s: 'Fixture', PlayerCount_I: 0 })
+    );
+    const refresher = new StateRefresher(state, client);
+    await refresher.initialize();
+    await native.listPlayers();
+    await native.listSquads();
+    await native.showCurrentMap();
+    await native.showNextMap();
+    await native.showServerInfo();
+    await native.warn(eos, 'native');
+    await native.broadcast('native');
+    await native.kick(eos, 'fixture');
+    await native.ban(eos, '1d', 'fixture');
+    await native.forceTeamChange(eos);
+    const legacy = events.createFacade('different-legacy-plugin');
+    await legacy.rcon.warn(eos, 'legacy');
+    await legacy.rcon.broadcast('legacy');
+    await legacy.rcon.execute('explicit-legacy');
+    await runtime.unmount('rconRecorder');
+    const all = await recordingEntries(directory);
+    const completed = all.filter((item) => item.type === 'command');
+    assert.equal(
+      completed.length,
+      [...fake.commandCounts.values()].reduce((sum, count) => sum + count, 0)
+    );
+    assert.equal(all.filter((item) => item.type === 'push').length, completed.length);
+    assert.ok(completed.some((item) => item.command === `AdminWarn "${eos}" legacy`));
+    assert.ok(completed.some((item) => item.command === `AdminWarn "${eos}" native`));
+    assert.ok(completed.some((item) => item.command === 'ListPlayers'));
+    assert.ok(completed.some((item) => item.command === 'explicit-legacy'));
+    assert.ok(all.every((item) => item.schemaVersion === 1));
+    assert.ok(!JSON.stringify(all).includes('sensitive raw line'));
+    assert.ok(!JSON.stringify(all).includes('transport-only-fixture'));
+    const size = all.length;
+    await native.warn(eos, 'unmounted');
+    assert.equal((await recordingEntries(directory)).length, size);
+    await runtime.mount(
+      'rconRecorder',
+      recorderDefinition.create(),
+      recorderOptions(directory, { recordLogLines: true, maxEntryKB: 1 })
+    );
+    events.emit('RAW_LOG_LINE', 'transport-only-fixture ' + 'Ω'.repeat(10000));
+    await client.stop();
+    await client.connect(); // subscription survives the connection lifecycle
+    await native.broadcast('after reconnect');
+    await runtime.unmount('rconRecorder');
+    const remounted = await recordingEntries(directory);
+    const log = remounted.find((item) => item.type === 'log')!;
+    assert.deepEqual(log.truncated, ['line']);
+    assert.ok(String(log.line).startsWith('[REDACTED]'));
+    assert.ok(!JSON.stringify(remounted).includes('transport-only-fixture'));
+    assert.ok(Buffer.byteLength(JSON.stringify(log)) + 1 <= 1024);
+    assert.equal(
+      remounted.filter((item) => item.command === 'AdminBroadcast after reconnect').length,
+      1
+    );
+    assert.deepEqual(failures, []);
+    legacy.dispose();
+  } finally {
+    await runtime.stop();
+    await client.stop();
+    await fake.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('recorder overload is observable and slow disk never delays RCON completion', async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), 'squadxo-recorder-overload-'));
+  const probe = await open(join(directory, 'probe'), 'w');
+  const prototype = Object.getPrototypeOf(probe) as FileHandle;
+  const original = prototype.writeFile;
+  await probe.close();
+  await unlink(join(directory, 'probe'));
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let writing = false;
+  context.mock.method(
+    prototype,
+    'writeFile',
+    async function (this: FileHandle, ...args: Parameters<FileHandle['writeFile']>) {
+      writing = true;
+      await gate;
+      return original.apply(this, args);
+    }
+  );
+  const fake = new FakeRconServer();
+  const port = await fake.listen();
+  const client = new SquadRconClient({
+    host: '127.0.0.1',
+    port,
+    password: 'fixture',
+    autoReconnect: false
+  });
+  const state = new ServerState();
+  const events = new LegacyServerHost({ state, rcon: client });
+  const warnings: unknown[] = [];
+  const runtime = new PluginRuntime({
+    state,
+    rcon: client,
+    events,
+    connectors: new ConnectorRegistry(),
+    logger: (_plugin, level, _message, details) => {
+      if (level === 'warn') warnings.push(details);
+    }
+  });
+  try {
+    await runtime.mount(
+      'rconRecorder',
+      recorderDefinition.create(),
+      recorderOptions(directory, { maxBufferMB: 0.001, maxEntryKB: 1, compress: false })
+    );
+    await client.connect();
+    await client.execute('first');
+    await waitFor(() => writing);
+    for (let index = 0; index < 20; index++)
+      assert.equal(await client.execute(`fast-${index}`), 'chunk one chunk two');
+    assert.equal(fake.commandCounts.size, 21); // all completed while writes are still blocked
+    assert.ok(warnings.length > 0);
+    release();
+    await runtime.stop();
+    const all = await recordingEntries(directory);
+    assert.ok(all.length < 42);
+  } finally {
+    release();
+    await runtime.stop();
+    await client.stop();
+    await fake.close();
+    await rm(directory, { recursive: true, force: true });
   }
 });

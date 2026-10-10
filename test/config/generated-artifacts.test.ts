@@ -10,6 +10,7 @@ interface MetadataEntry {
   definition: NativePluginDefinition;
 }
 interface GeneratedNativeConfig {
+  name?: string;
   module?: string;
   source?: unknown;
   enabled: boolean;
@@ -42,6 +43,16 @@ test('generated config, README and reference match the committed artifacts', asy
   assert.equal(await generator.buildReadme(), committedReadme);
   const reference = await readFile(resolve('docs/reference/plugins.md'), 'utf8');
   assert.equal(await generator.buildReference(), reference);
+});
+
+test('native recorder example remains disabled with raw game logs opt-in', async () => {
+  const recorder = (await generator.buildConfig()).plugins.find(
+    (entry) => entry.name === 'rconRecorder'
+  );
+  assert.ok(recorder);
+  assert.equal(recorder.enabled, false);
+  assert.equal(recorder.options.recordLogLines, false);
+  assert.deepEqual(recorder.connectors, {});
 });
 
 test('native metadata generates defaults without creating plugins and preserves managed sources', async () => {
