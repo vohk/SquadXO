@@ -3,6 +3,12 @@ import { EventEmitter } from 'node:events';
 import { resolve } from 'node:path';
 import test from 'node:test';
 import { pathToFileURL } from 'node:url';
+import { LegacyServerHost } from '../../src/compatibility/legacy-server-facade.js';
+import { ServerState } from '../../src/domain/server-state.js';
+import { SquadRconClient } from '../../src/rcon/client.js';
+import { ServerStateReducer } from '../../src/server/state-reducer.js';
+import { SquadLogParser } from '../../src/logs/parser.js';
+import { captureLines, deployableLines } from '../logs/fixtures/patch-log.js';
 
 function legacyServer() {
   const server = new EventEmitter() as EventEmitter & {
@@ -74,10 +80,6 @@ test('Discord message updaters contain command callback rejections and retain th
     }
   }
   const discord = new EventEmitter();
-  Object.assign(discord, {
-    removeEventListener: (event: string, listener: (...arguments_: unknown[]) => void) =>
-      discord.removeListener(event, listener)
-  });
   const messageStore = {
     define: () => ({ sync: async () => undefined, findAll: async () => [] })
   };
@@ -99,6 +101,11 @@ test('Discord message updaters contain command callback rejections and retain th
   assert.equal(failures.length, 2);
   assert.equal(failures[1]?.[1], 'Could not process Discord command:');
   assert.equal(discord.listenerCount('messageCreate'), 1);
+  assert.equal(discord.listeners('messageCreate')[0], plugin.handleDiscordMessage);
+  await plugin.unmount();
+  assert.equal(discord.listenerCount('messageCreate'), 0);
+  await plugin.mount();
+  assert.deepEqual(discord.listeners('messageCreate'), [plugin.handleDiscordMessage]);
   await plugin.unmount();
   assert.equal(discord.listenerCount('messageCreate'), 0);
 });
@@ -276,4 +283,117 @@ test('PteroMonitor waits for an active database write before unmount completes',
   await Promise.all([poll, unmount]);
   assert.equal(plugin.updateInFlight, null);
   assert.equal(plugin.abortController, null);
+});
+
+test('DiscordRcon uses public role membership, preserves command permissions, and removes the exact listener', async () => {
+  const { default: DiscordRcon } = await import(
+    pathToFileURL(resolve('squad-server/plugins/discord-rcon.js')).href
+  );
+  const discord = new EventEmitter();
+  const commands: string[] = [];
+  const server = legacyServer();
+  server.rcon = {
+    execute: async (command: string) => {
+      commands.push(command);
+      return 'OK';
+    }
+  };
+  const plugin = new DiscordRcon(
+    server,
+    { discordClient: 'discord', channelID: 'console', permissions: { admin: ['AdminBroadcast'] } },
+    { discord }
+  );
+  const replies: string[] = [];
+  const message = {
+    author: { bot: false },
+    channel: { id: 'console', send: async () => undefined },
+    content: 'AdminBroadcast hello',
+    member: { roles: { cache: new Map([['admin', {}]]) } },
+    reply: async (text: string) => {
+      replies.push(text);
+    }
+  };
+  await plugin.mount();
+  assert.deepEqual(discord.listeners('messageCreate'), [plugin.onMessage]);
+  await plugin.onMessage(message);
+  await plugin.onMessage({ ...message, content: 'AdminKick target' });
+  await plugin.onMessage({ ...message, member: undefined });
+  await plugin.onMessage({ ...message, channel: { ...message.channel, id: 'other' } });
+  await plugin.onMessage({ ...message, author: { bot: true } });
+  assert.deepEqual(commands, ['AdminBroadcast hello']);
+  assert.equal(replies.length, 2);
+  await plugin.unmount();
+  assert.equal(discord.listenerCount('messageCreate'), 0);
+  await plugin.mount();
+  assert.deepEqual(discord.listeners('messageCreate'), [plugin.onMessage]);
+  await plugin.unmount();
+  assert.equal(discord.listenerCount('messageCreate'), 0);
+});
+
+test('DiscordPlaceholder remounts without retaining old callbacks', async () => {
+  const { default: DiscordPlaceholder } = await import(
+    pathToFileURL(resolve('squad-server/plugins/discord-placeholder.js')).href
+  );
+  const discord = new EventEmitter();
+  const plugin = new DiscordPlaceholder(
+    legacyServer(),
+    { discordClient: 'discord', channelID: 'placeholders' },
+    { discord }
+  );
+  for (let index = 0; index < 2; index++) {
+    await plugin.mount();
+    assert.deepEqual(discord.listeners('messageCreate'), [plugin.onMessage]);
+    await plugin.unmount();
+    assert.equal(discord.listenerCount('messageCreate'), 0);
+  }
+});
+
+test('SocketIOAPI forwards actual translated deployable/capture payloads and owns their teardown', async () => {
+  const { default: SocketIOAPI } = await import(
+    pathToFileURL(resolve('squad-server/plugins/socket-io-api.js')).href
+  );
+  const state = new ServerState();
+  const rcon = new SquadRconClient({
+    host: '127.0.0.1',
+    port: 1,
+    password: 'unused',
+    autoReconnect: false
+  });
+  const host = new LegacyServerHost({ state, rcon });
+  const facade = host.createFacade('socket-fixture');
+  const plugin = new SocketIOAPI(facade, { websocketPort: 0, securityToken: 'fixture-token' }, {});
+  const broadcasts: { name: string; data: Record<string, unknown> }[] = [];
+  plugin.io.emit = (name: string, data: Record<string, unknown>) => {
+    broadcasts.push({ name, data });
+    return true;
+  };
+  const parser = new SquadLogParser();
+  const reducer = new ServerStateReducer(state);
+  try {
+    await plugin.mount();
+    for (const line of [...deployableLines, ...captureLines]) {
+      for (const event of parser.parseLine(line))
+        for (const reduced of reducer.reduce(event)) host.publish(reduced);
+    }
+    await host.drain();
+    assert.equal(broadcasts.length, 8);
+    const spawned = broadcasts.filter((item) => item.name === 'DEPLOYABLE_SPAWNED');
+    assert.equal(spawned.length, 3);
+    assert.equal(spawned[2]?.data.teamID, 0);
+    assert.deepEqual(spawned[0]?.data.location, { x: 15160, y: -2150, z: -12980 });
+    const neutralized = broadcasts.filter((item) => item.name === 'CAPTURE_ZONE_NEUTRALIZED');
+    assert.equal(neutralized[0]?.data.previousTeamID, 1);
+    assert.equal(neutralized[0]?.data.teamID, 2);
+    assert.equal(neutralized[0]?.data.zoneName, 'Walled Courts');
+    assert.ok(neutralized[0]?.data.time instanceof Date);
+    const payload = broadcasts[0]!.data;
+    await plugin.unmount();
+    host.emit('DEPLOYABLE_SPAWNED', payload);
+    await host.drain();
+    assert.equal(broadcasts.length, 8);
+    assert.equal(plugin.httpServer.listening, false);
+  } finally {
+    await plugin.unmount();
+    facade.dispose();
+  }
 });

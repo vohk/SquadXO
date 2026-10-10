@@ -38,6 +38,8 @@
     "src/plugins/builtin/discord-round-ended.ts",
     "src/plugins/builtin/error-notify.ts",
     "src/plugins/builtin/log-grabber.ts",
+    "src/plugins/builtin/rcon-recorder-store.ts",
+    "src/plugins/builtin/rcon-recorder.ts",
     "src/plugins/loader.ts",
     "src/plugins/runtime.ts",
     "src/plugins/updater.ts",

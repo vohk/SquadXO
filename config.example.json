@@ -319,6 +319,24 @@
       "fetchTimeout": 8
     },
     {
+      "type": "native",
+      "name": "rconRecorder",
+      "module": "./dist/src/plugins/builtin/rcon-recorder.js",
+      "enabled": false,
+      "connectors": {},
+      "options": {
+        "directory": "./rcon-recordings",
+        "recordLogLines": false,
+        "retentionDays": 14,
+        "maxTotalMB": 1024,
+        "maxFileMB": 16,
+        "maxBufferMB": 4,
+        "maxEntryKB": 64,
+        "maxDedupEntries": 1024,
+        "compress": true
+      }
+    },
+    {
       "plugin": "RollingFileLogger",
       "enabled": false,
       "logDir": "./logs/squadjs",

@@ -1,5 +1,10 @@
 import type { ConnectorRegistry } from '../connectors/registry.js';
-import type { SquadEventName, SquadEventPayload } from '../domain/events.js';
+import type {
+  RconCommandCompletedEvent,
+  RconPushEvent,
+  SquadEventName,
+  SquadEventPayload
+} from '../domain/events.js';
 import type { EOSID } from '../domain/identity.js';
 import type { ServerState } from '../domain/server-state.js';
 import type { SquadRconClient } from '../rcon/client.js';
@@ -29,6 +34,7 @@ interface MountedPlugin extends OwnedResources {
 export class PluginRuntime {
   readonly #state: ServerState;
   readonly #pluginRcon: PluginRcon;
+  readonly #rcon: SquadRconClient;
   readonly #connectors: ConnectorRegistry;
   readonly #events: LegacyServerHost;
   readonly #logs: Pick<LogReader, 'copySnapshot'> | undefined;
@@ -60,6 +66,7 @@ export class PluginRuntime {
     readonly shutdownTimeoutMs?: number;
   }) {
     this.#state = options.state;
+    this.#rcon = options.rcon;
     this.#pluginRcon = createPluginRcon(options.rcon);
     this.#connectors = options.connectors;
     this.#events = options.events;
@@ -115,6 +122,33 @@ export class PluginRuntime {
         event: EventName,
         handler: (payload: SquadEventPayload<EventName>) => void | Promise<void>
       ): (() => void) => {
+        if (event === 'RCON_AUDIT_LOG_LINE') {
+          const unsubscribe = this.#events.subscribe(name, 'RAW_LOG_LINE', (line: string) =>
+            (handler as (payload: string) => void | Promise<void>)(this.#rcon.redactAuditText(line))
+          );
+          resources.unsubscribers.push(unsubscribe);
+          return unsubscribe;
+        }
+        if (event === 'RCON_COMMAND_COMPLETED' || event === 'RCON_PUSH') {
+          const unsubscribe = this.#rcon.subscribeAudit((audit) => {
+            if (
+              (event === 'RCON_COMMAND_COMPLETED' && audit.type === 'command') ||
+              (event === 'RCON_PUSH' && audit.type === 'push')
+            ) {
+              run(
+                () =>
+                  (
+                    handler as (
+                      payload: RconCommandCompletedEvent | RconPushEvent
+                    ) => void | Promise<void>
+                  )(audit),
+                event
+              );
+            }
+          });
+          resources.unsubscribers.push(unsubscribe);
+          return unsubscribe;
+        }
         const unsubscribe = this.#events.subscribe(
           name,
           event,

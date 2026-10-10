@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { Socket } from 'node:net';
+import type { RconAuditEvent } from '../domain/events.js';
 import type { EOSID } from '../domain/identity.js';
 import { RCON_PACKET, RconPacketDecoder, RconProtocolError, encodePacket } from './codec.js';
 import type { RconPacket } from './codec.js';
@@ -49,7 +50,14 @@ export interface RconReconnectedEvent {
   readonly attempts: number;
 }
 
-interface PendingCommand {
+interface CommandAudit {
+  readonly requestID: number;
+  readonly requestedAt: Date;
+  readonly started: number;
+  sentAt?: Date;
+}
+
+interface PendingCommand extends CommandAudit {
   readonly command: string;
   readonly resolve: (response: string) => void;
   readonly reject: (error: Error) => void;
@@ -85,6 +93,8 @@ export class RconClient extends EventEmitter {
   #lastSocketError: Error | undefined;
   #authenticationCount = 0;
   #nextCount = 1;
+  #nextRequestID = 1;
+  readonly #auditObservers = new Set<(event: RconAuditEvent) => void>();
   #activeCommand: PendingCommand | undefined;
   readonly #queue: PendingCommand[] = [];
 
@@ -138,17 +148,43 @@ export class RconClient extends EventEmitter {
     });
   }
 
+  /** Read-only internal audit subscription. Observer failure cannot affect RCON work. */
+  subscribeAudit(observer: (event: RconAuditEvent) => void): () => void {
+    this.#auditObservers.add(observer);
+    return () => this.#auditObservers.delete(observer);
+  }
+
+  /** Internal credential-filtered text view for diagnostic recording, never a transport API. */
+  redactAuditText(text: string): string {
+    return text.split(this.#options.password).join('[REDACTED]');
+  }
+
   execute(command: string): Promise<string> {
-    if (this.#state !== 'ready') return Promise.reject(new Error('RCON client is not ready'));
-    if (!command.trim()) return Promise.reject(new TypeError('RCON command cannot be empty'));
-    if (!this.#options.commandAllowed(command)) {
-      return Promise.reject(
-        new Error(`RCON command blocked by runtime policy: ${commandName(command)}`)
-      );
+    const audit: CommandAudit = {
+      requestID: this.#nextRequestID++,
+      requestedAt: new Date(),
+      started: performance.now()
+    };
+    let error: Error | undefined;
+    if (this.#state !== 'ready') error = new Error('RCON client is not ready');
+    else if (!command.trim()) error = new TypeError('RCON command cannot be empty');
+    else if (!this.#options.commandAllowed(command)) {
+      error = new Error(`RCON command blocked by runtime policy: ${commandName(command)}`);
+    }
+    if (error) {
+      this.#completeAudit(command, audit, { error });
+      return Promise.reject(error);
     }
 
     return new Promise<string>((resolve, reject) => {
-      this.#queue.push({ command, resolve, reject, count: this.#allocateCount(), chunks: [] });
+      this.#queue.push({
+        ...audit,
+        command,
+        resolve,
+        reject,
+        count: this.#allocateCount(),
+        chunks: []
+      });
       this.#startNextCommand();
     });
   }
@@ -235,6 +271,8 @@ export class RconClient extends EventEmitter {
   #onPacket(packet: RconPacket): void {
     this.emit('packet', packet);
     if (packet.type === RCON_PACKET.chat) {
+      if (this.#state === 'ready')
+        this.#publishAudit({ type: 'push', time: new Date(), body: packet.body });
       this.emit('chat', packet);
       return;
     }
@@ -289,7 +327,9 @@ export class RconClient extends EventEmitter {
     if (packet.body) active.chunks.push(packet.body);
     if (active.timer) clearTimeout(active.timer);
     this.#activeCommand = undefined;
-    active.resolve(active.chunks.join(''));
+    const response = active.chunks.join('');
+    this.#completeAudit(active.command, active, { response });
+    active.resolve(response);
     this.#startNextCommand();
   }
 
@@ -299,7 +339,9 @@ export class RconClient extends EventEmitter {
     if (!next) return;
     const socket = this.#socket;
     if (!socket?.writable) {
-      next.reject(new Error('RCON socket is not writable'));
+      const error = new Error('RCON socket is not writable');
+      this.#completeAudit(next.command, next, { error });
+      next.reject(error);
       this.#failConnection(new Error('RCON socket is not writable'));
       return;
     }
@@ -310,22 +352,27 @@ export class RconClient extends EventEmitter {
       () => this.#failConnection(new Error(`RCON command timed out: ${commandName(next.command)}`)),
       this.#options.commandTimeoutMs
     );
-    const commandPacket = encodePacket(
-      RCON_PACKET.command,
-      RCON_PACKET.mid,
-      next.count,
-      next.command,
-      this.#options.maximumPacketSize
-    );
-    const endPacket = encodePacket(
-      RCON_PACKET.command,
-      RCON_PACKET.end,
-      next.count,
-      '',
-      this.#options.maximumPacketSize
-    );
-    socket.write(commandPacket);
-    socket.write(endPacket);
+    try {
+      const commandPacket = encodePacket(
+        RCON_PACKET.command,
+        RCON_PACKET.mid,
+        next.count,
+        next.command,
+        this.#options.maximumPacketSize
+      );
+      const endPacket = encodePacket(
+        RCON_PACKET.command,
+        RCON_PACKET.end,
+        next.count,
+        '',
+        this.#options.maximumPacketSize
+      );
+      next.sentAt = new Date();
+      socket.write(commandPacket);
+      socket.write(endPacket);
+    } catch (error) {
+      this.#failConnection(error instanceof Error ? error : new Error(String(error)));
+    }
   }
 
   #onClose(socket: Socket): void {
@@ -400,8 +447,62 @@ export class RconClient extends EventEmitter {
     const active = this.#activeCommand;
     this.#activeCommand = undefined;
     if (active?.timer) clearTimeout(active.timer);
-    active?.reject(error);
-    while (this.#queue.length > 0) this.#queue.shift()?.reject(error);
+    if (active) {
+      this.#completeAudit(active.command, active, { error });
+      active.reject(error);
+    }
+    for (const queued of this.#queue.splice(0)) {
+      this.#completeAudit(queued.command, queued, { error });
+      queued.reject(error);
+    }
+  }
+
+  #completeAudit(
+    command: string,
+    audit: CommandAudit,
+    result: { readonly response: string } | { readonly error: Error }
+  ): void {
+    this.#publishAudit({
+      type: 'command',
+      requestID: audit.requestID,
+      command,
+      requestedAt: audit.requestedAt,
+      ...(audit.sentAt ? { sentAt: audit.sentAt } : {}),
+      time: new Date(),
+      durationMs: Math.max(0, performance.now() - audit.started),
+      ...('error' in result
+        ? { outcome: 'error', error: { name: result.error.name, message: result.error.message } }
+        : { outcome: 'success', response: result.response })
+    });
+  }
+
+  #publishAudit(event: RconAuditEvent): void {
+    if (this.#auditObservers.size === 0) return;
+    const redact = (text: string): string => this.redactAuditText(text);
+    const safe: RconAuditEvent =
+      event.type === 'push'
+        ? Object.freeze({ ...event, body: redact(event.body) })
+        : Object.freeze({
+            ...event,
+            command: redact(event.command),
+            ...(event.response !== undefined ? { response: redact(event.response) } : {}),
+            ...(event.error
+              ? {
+                  error: Object.freeze({
+                    name: event.error.name,
+                    message: redact(event.error.message)
+                  })
+                }
+              : {})
+          });
+    for (const observer of this.#auditObservers) {
+      // Audit is observational: even a faulty observer must not interrupt commands or reconnects.
+      try {
+        observer(safe);
+      } catch {
+        // Native runtime reports callback failures through its owned subscription wrapper.
+      }
+    }
   }
 
   #clearDeadlines(): void {

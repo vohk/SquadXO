@@ -107,6 +107,28 @@ export interface DeployableSpawnedEvent extends SourceEvent {
   readonly location: LogLocation;
 }
 
+/** Application command audit; transport/authentication packets are never included. */
+export interface RconCommandCompletedEvent {
+  readonly type: 'command';
+  readonly requestID: number;
+  readonly command: string;
+  readonly requestedAt: Date;
+  readonly sentAt?: Date;
+  readonly time: Date;
+  readonly durationMs: number;
+  readonly outcome: 'success' | 'error';
+  readonly response?: string;
+  readonly error?: { readonly name: string; readonly message: string };
+}
+
+export interface RconPushEvent {
+  readonly type: 'push';
+  readonly time: Date;
+  readonly body: string;
+}
+
+export type RconAuditEvent = RconCommandCompletedEvent | RconPushEvent;
+
 export interface SquadEventMap {
   ADMIN_BROADCAST: SourceEvent & { readonly message: string; readonly from: string };
   ADDING_CLIENT_CONNECTION: LegacyConnectionEvent;
@@ -149,6 +171,9 @@ export interface SquadEventMap {
   POSSESSED_ADMIN_CAMERA: unknown;
   RAW_LOG_LINE: string;
   RCON_ERROR: unknown;
+  RCON_COMMAND_COMPLETED: RconCommandCompletedEvent;
+  RCON_PUSH: RconPushEvent;
+  RCON_AUDIT_LOG_LINE: string;
   RESOLVED_EOS_ID: LegacyConnectionEvent;
   ROUND_ENDED: RoundEndedEvent;
   SQUAD_CREATED: unknown;

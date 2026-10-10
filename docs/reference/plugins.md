@@ -531,3 +531,38 @@ Module: `./dist/src/plugins/builtin/log-grabber.js` · API: `1`.
 | `allowAdministrator` | `boolean` | no | `true` | Permit members with Discord Administrator permission. |
 | `ephemeral` | `boolean` | no | `false` | Send successful log downloads as ephemeral interaction responses. |
 | `maximumSourceBytes` | `number` | no | `2147483648` | Maximum uncompressed SquadGame.log size accepted for one request. |
+
+### rconRecorder
+
+Archives shared-client RCON command outcomes and pushed bodies as bounded JSONL/gzip files, without extra commands or authentication packets.
+
+Module: `./dist/src/plugins/builtin/rcon-recorder.js` · API: `1`.
+
+None.
+
+| Option | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `directory` | `string` | no | `./rcon-recordings` | Dedicated recording directory, resolved from process working directory; use a separate directory per process/instance. |
+| `recordLogLines` | `boolean` | no | `false` | Include raw game-log lines; may contain player identities, IPs and chat. Disabled by default. |
+| `retentionDays` | `number` | no | `14` | Delete closed recordings older than this many days. |
+| `maxTotalMB` | `number` | no | `1024` | Hard byte budget in MiB for recorder-owned active, archived and compression scratch files. |
+| `maxFileMB` | `number` | no | `16` | Rotate at this many MiB or a UTC hour change; must not exceed maxTotalMB. |
+| `maxBufferMB` | `number` | no | `4` | Maximum queued serialized MiB; excess entries are dropped without delaying RCON. |
+| `maxEntryKB` | `number` | no | `64` | Maximum serialized KiB per entry (at least 1); long text is truncated and marked. |
+| `maxDedupEntries` | `number` | no | `1024` | Maximum cached command/response fingerprints for same-response deduplication per file. |
+| `compress` | `boolean` | no | `true` | Gzip closed files when source plus scratch fits the total budget; otherwise retain JSONL. |
+
+
+## RCON recorder behavior
+
+The native `rconRecorder` example is disabled. It records shared-client command outcomes and unsolicited pushed bodies while mounted; it sends no extra commands and excludes authentication packets. Its implementation was inspired by [lbzepoqo's RconRecorder](https://github.com/lbzepoqo/SquadJS/blob/0f686f8300270a8eb50b726d476a7c28771cd938/squad-server/plugins/rcon-recorder.js), with native subscriptions and new bounded storage. Original SquadJS copyright and Boost Software License notices are retained in source and `LICENSE`.
+
+`directory`, `retentionDays` and `maxTotalMB` retain their upstream purpose. `recordLogLines` now defaults to false; enable it explicitly to include raw game-log content. The new file, queue, entry and deduplication bounds are listed in the options table. Limits use MiB/KiB (1024-based). Commands, responses and pushes may contain chat, player IDs/IPs, moderation details or operator-supplied secrets; protect the dedicated directory. New directories/files use modes 0700/0600 where supported. Existing directory permissions are not changed. Never share a directory between processes or recorder instances; overlapping instances in one process are rejected. Only filenames owned by this recorder are pruned, leaving unrelated files alone.
+
+Each JSONL entry has `schemaVersion: 1`, `serverID`, `type` and a UTC `time`. Command records additionally carry request ID, request/send times, duration and success/error outcome. Authentication packets are never emitted, and occurrences of the configured RCON password in RCON audit text are redacted without changing the returned response. The opt-in raw game-log view also redacts the configured RCON password; other secrets in application/log content are not automatically identified. Oversized text is shortened with a `truncated` field naming the affected fields. Records larger than the configured serialized entry limit are dropped.
+
+Successful repeated responses use `same: true` instead of `response`, keyed by the SHA-256 `commandKey` of the complete audited command. References are to the last written successful response for that key in the same file. The bounded cache resets per file; evicted entries are written in full again. A file with truncated responses is not a lossless replay of all original content.
+
+Files rotate at UTC hour changes or `maxFileMB`; filenames include a unique suffix, so a backwards clock or repeated hour cannot reopen an older file. Completion timestamps choose the command's hour. One worker serializes writes, rotation, gzip and retention. `maxTotalMB` counts the active file and reserves compression scratch as well as archives. Oldest closed files are removed first, with age retention and a 1024-file ceiling. If gzip cannot fit alongside its source, JSONL is retained. Startup removes interrupted scratch files and compresses surviving JSONL when the budget permits. Maintenance also rotates idle hours and applies retention once a minute.
+
+Slow disk does not block RCON: the queue is limited by serialized bytes and 4096 entries, and excess entries are dropped. A first overload warning, minute summaries and shutdown totals report drops, oversized entries and I/O failures without their content. Failed writes are rolled back where possible and later entries retry. Unmount unsubscribes, stops maintenance, drains accepted entries, closes the file and waits for compression; later callbacks cannot reopen files.
