@@ -1149,6 +1149,7 @@ export default class SmartSwitch extends DiscordBasePlugin {
     const switchedSquads = { team1: [], team2: [] };
     const excluded = new Set();
     const originalTeams = new Map();
+    const operation = {};
     this.swappedPlayers.clear();
     const isActive = () => this.active && this.roundGeneration === generation;
     try {
@@ -1157,8 +1158,15 @@ export default class SmartSwitch extends DiscordBasePlugin {
         await this.broadcast(`Reshuffling groups in ${this.options.shuffleDelaySeconds} seconds.`);
       if (!(await this.wait(this.options.shuffleDelaySeconds * 1000)) || !isActive()) return true;
       movementStarted = performance.now();
-      await this.randomizeSquads(switchedSquads, summary, excluded, isActive, originalTeams);
-      if (isActive()) await this.autoBalanceTeams(summary, excluded, isActive);
+      await this.randomizeSquads(
+        switchedSquads,
+        summary,
+        excluded,
+        isActive,
+        originalTeams,
+        operation
+      );
+      if (isActive()) await this.autoBalanceTeams(summary, excluded, isActive, operation);
     } catch (error) {
       summary.error = error.message;
     } finally {
@@ -1685,7 +1693,8 @@ export default class SmartSwitch extends DiscordBasePlugin {
     isActive,
     countPlanned = true,
     phase = 'shuffle',
-    initialRoster
+    initialRoster,
+    operation
   ) {
     const ids = group.players.map((player) => player.eosID);
     const departed = new Set();
@@ -1702,6 +1711,7 @@ export default class SmartSwitch extends DiscordBasePlugin {
       const change = await this.movePlayers(group.players, teamID, true, {
         wholeParties: true,
         initialRoster,
+        operation,
         isActive,
         onDeparted: (player) => departed.add(player.eosID)
       });
@@ -1740,10 +1750,11 @@ export default class SmartSwitch extends DiscordBasePlugin {
     summary = { planned: 0, skipped: 0, failed: 0, groups: [] },
     excluded = new Set(),
     isActive = () => this.active,
-    originalTeams = new Map()
+    originalTeams = new Map(),
+    operation = {}
   ) {
     if (!this.options.shuffleEnabled) return;
-    const players = await readSwitchRoster(this.server, []);
+    const players = await readSwitchRoster(this.server, [], undefined, operation);
     players.forEach((player) => originalTeams.set(player.eosID, player.teamID));
     const groups = switchGroups(players);
     const target = Math.floor(
@@ -1818,7 +1829,7 @@ export default class SmartSwitch extends DiscordBasePlugin {
           throw Object.assign(new Error('Next round started or plugin stopped'), {
             stopShuffle: true
           });
-        current ??= await readSwitchRoster(this.server, []);
+        current ??= await readSwitchRoster(this.server, [], undefined, operation);
         if (!isActive())
           throw Object.assign(new Error('Next round started or plugin stopped'), {
             stopShuffle: true
@@ -1842,7 +1853,8 @@ export default class SmartSwitch extends DiscordBasePlugin {
           isActive,
           false,
           'shuffle',
-          current
+          current,
+          operation
         );
         current = execution.players;
         if (
@@ -1873,10 +1885,11 @@ export default class SmartSwitch extends DiscordBasePlugin {
   async autoBalanceTeams(
     summary = { planned: 0, skipped: 0, failed: 0, groups: [] },
     excluded = new Set(),
-    isActive = () => this.active
+    isActive = () => this.active,
+    operation = {}
   ) {
     if (!this.options.shuffleEnabled) return;
-    let players = await readSwitchRoster(this.server, []);
+    let players = await readSwitchRoster(this.server, [], undefined, operation);
     while (isActive()) {
       const difference = this.getTeamBalanceDifference(players);
       if (Math.abs(difference) <= 1) return;
@@ -1911,9 +1924,11 @@ export default class SmartSwitch extends DiscordBasePlugin {
         isActive,
         true,
         'balance',
-        players
+        players,
+        operation
       );
-      players = execution.players ?? (await readSwitchRoster(this.server, []));
+      players =
+        execution.players ?? (await readSwitchRoster(this.server, [], undefined, operation));
     }
   }
 

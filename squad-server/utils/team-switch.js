@@ -1,26 +1,19 @@
 // Shared by the legacy switchers: plan destinations, then verify each command once.
 const snapshots = new WeakMap();
-const snapshotMaxAgeMs = 100;
-const rosterShape = (players) =>
-  JSON.stringify(
-    players.map((player) => [
-      player.eosID,
-      player.teamID,
-      player.partyID,
-      player.squadID,
-      player.isLeader
-    ])
-  );
-export async function readSwitchRoster(server, previous = server.players ?? [], current) {
+export async function readSwitchRoster(
+  server,
+  previous = server.players ?? [],
+  current,
+  operation
+) {
   const snapshot = current && snapshots.get(current);
-  const before = server.rcon.getCommandVersion?.();
+  const before = server.rcon.getMutationVersion?.();
   const reusable =
+    operation &&
     snapshot?.server === server &&
-    snapshot.version === before &&
-    snapshot.shape === rosterShape(current) &&
-    performance.now() - snapshot.observedAt <= snapshotMaxAgeMs;
+    snapshot.operation === operation &&
+    snapshot.version === before;
   const players = reusable ? current : await server.rcon.getListPlayers();
-  const observedAt = reusable ? snapshot.observedAt : performance.now();
   if (!Array.isArray(players) || players.length === 0) {
     throw new Error('Player roster is empty; team changes were not attempted');
   }
@@ -35,13 +28,10 @@ export async function readSwitchRoster(server, previous = server.players ?? [], 
     }
     ids.add(player.eosID);
   }
-  if (previous.some((player) => player.eosID && !ids.has(player.eosID))) {
-    throw new Error('Player roster changed or is incomplete; retry after a fresh roster');
-  }
   const result = players.map((player) => ({ ...player }));
-  const after = server.rcon.getCommandVersion?.();
-  if (Number.isInteger(before) && after === before + (reusable ? 0 : 1))
-    snapshots.set(result, { server, version: after, shape: rosterShape(result), observedAt });
+  // Stamp the version when the query was issued. A queued mutation after it
+  // invalidates the observation before dispatch, even if the query itself succeeds.
+  if (Number.isInteger(before)) snapshots.set(result, { server, version: before, operation });
   return result;
 }
 
@@ -77,6 +67,7 @@ export async function moveToTeam(
     onDeparted = () => {},
     roster,
     initialRoster,
+    operation,
     wholeParties = false
   } = {}
 ) {
@@ -94,7 +85,7 @@ export async function moveToTeam(
   };
   let players;
   try {
-    players = await readSwitchRoster(server, wholeParties ? [] : roster, initialRoster);
+    players = await readSwitchRoster(server, wholeParties ? [] : roster, initialRoster, operation);
   } catch (error) {
     error.stopShuffle = true;
     throw error;
@@ -175,24 +166,21 @@ export async function moveToTeam(
         { stopShuffle: true }
       );
     const observation = snapshots.get(players);
-    if (
-      observation &&
-      (server.rcon.getCommandVersion?.() !== observation.version ||
-        performance.now() - observation.observedAt > snapshotMaxAgeMs)
-    ) {
-      players = await readSwitchRoster(server, wholeParties ? [] : roster);
+    if (observation && server.rcon.getMutationVersion?.() !== observation.version) {
+      players = await readSwitchRoster(server, wholeParties ? [] : roster, undefined, operation);
       continue;
     }
     commanded.add(eosID);
     const before = players;
     let commandError;
     try {
-      await server.rcon.switchTeam(eosID);
+      await server.rcon.switchTeam(eosID, isActive);
     } catch (error) {
+      if (error.name === 'RconCommandCancelledError') throw error;
       commandError = error;
     }
     try {
-      players = await readSwitchRoster(server, wholeParties ? [] : before);
+      players = await readSwitchRoster(server, wholeParties ? [] : before, undefined, operation);
     } catch (error) {
       error.stopShuffle = true;
       throw error;

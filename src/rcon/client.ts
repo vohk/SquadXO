@@ -58,6 +58,7 @@ interface CommandAudit {
 }
 
 interface PendingCommand extends CommandAudit {
+  readonly isActive?: () => boolean;
   readonly command: string;
   readonly resolve: (response: string) => void;
   readonly reject: (error: Error) => void;
@@ -94,7 +95,7 @@ export class RconClient extends EventEmitter {
   #authenticationCount = 0;
   #nextCount = 1;
   #nextRequestID = 1;
-  #commandVersion = 0;
+  #mutationVersion = 0;
   readonly #auditObservers = new Set<(event: RconAuditEvent) => void>();
   #activeCommand: PendingCommand | undefined;
   readonly #queue: PendingCommand[] = [];
@@ -133,9 +134,9 @@ export class RconClient extends EventEmitter {
     return this.#state;
   }
 
-  /** Invalidates immediately reusable roster observations on commands and reconnects. */
-  get commandVersion(): number {
-    return this.#commandVersion;
+  /** Invalidates roster observations on potentially mutating requests and reconnects. */
+  get mutationVersion(): number {
+    return this.#mutationVersion;
   }
 
   get queueDepth(): number {
@@ -165,8 +166,7 @@ export class RconClient extends EventEmitter {
     return text.split(this.#options.password).join('[REDACTED]');
   }
 
-  execute(command: string): Promise<string> {
-    this.#commandVersion++;
+  execute(command: string, isActive?: () => boolean): Promise<string> {
     const audit: CommandAudit = {
       requestID: this.#nextRequestID++,
       requestedAt: new Date(),
@@ -178,15 +178,27 @@ export class RconClient extends EventEmitter {
     else if (!this.#options.commandAllowed(command)) {
       error = new Error(`RCON command blocked by runtime policy: ${commandName(command)}`);
     }
+    if (!error && isActive) {
+      try {
+        if (!isActive()) {
+          error = new Error('RCON command cancelled before send');
+          error.name = 'RconCommandCancelledError';
+        }
+      } catch (failure) {
+        error = failure instanceof Error ? failure : new Error(String(failure));
+      }
+    }
     if (error) {
       this.#completeAudit(command, audit, { error });
       return Promise.reject(error);
     }
 
+    if (!isRosterReadOnly(command)) this.#mutationVersion++;
     return new Promise<string>((resolve, reject) => {
       this.#queue.push({
         ...audit,
         command,
+        ...(isActive ? { isActive } : {}),
         resolve,
         reject,
         count: this.#allocateCount(),
@@ -248,7 +260,7 @@ export class RconClient extends EventEmitter {
     if (socket !== this.#socket || this.#state !== 'connecting') return;
     this.#clearTimer('connect');
     this.#setState('authenticating');
-    this.#commandVersion++;
+    this.#mutationVersion++;
     // Squad's implementation expects the first command to reuse the authentication sequence.
     this.#authenticationCount = this.#nextCount;
     socket.write(
@@ -345,6 +357,19 @@ export class RconClient extends EventEmitter {
     if (this.#state !== 'ready' || this.#activeCommand) return;
     const next = this.#queue.shift();
     if (!next) return;
+    try {
+      if (next.isActive && !next.isActive()) {
+        const cancelled = new Error('RCON command cancelled before send');
+        cancelled.name = 'RconCommandCancelledError';
+        throw cancelled;
+      }
+    } catch (error) {
+      const failure = error instanceof Error ? error : new Error(String(error));
+      this.#completeAudit(next.command, next, { error: failure });
+      next.reject(failure);
+      this.#startNextCommand();
+      return;
+    }
     const socket = this.#socket;
     if (!socket?.writable) {
       const error = new Error('RCON socket is not writable');
@@ -584,11 +609,29 @@ export class SquadRconClient extends RconClient {
     await this.execute(`AdminBan "${eosID}" ${interval} ${reason}`);
   }
 
-  async forceTeamChange(eosID: EOSID): Promise<void> {
-    await this.execute(`AdminForceTeamChange "${eosID}"`);
+  async forceTeamChange(eosID: EOSID, isActive?: () => boolean): Promise<void> {
+    await this.execute(`AdminForceTeamChange "${eosID}"`, isActive);
   }
 }
 
 function commandName(command: string): string {
   return command.trim().split(/\s+/, 1)[0] ?? 'unknown';
+}
+
+function isRosterReadOnly(command: string): boolean {
+  // Fixed queries do not change the roster. Unknown commands remain conservative.
+  const query = command.trim().toLowerCase();
+  if (
+    [
+      'listplayers',
+      'listsquads',
+      'listparties',
+      'showserverinfo',
+      'showcurrentmap',
+      'shownextmap',
+      'adminlistdisconnectedplayers'
+    ].includes(query)
+  )
+    return true;
+  return /^(adminbroadcast|adminwarn|adminsetfogofwar)(?:\s|$)/.test(query);
 }

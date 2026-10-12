@@ -7,7 +7,10 @@ import { mkdtemp, readdir, readFile, rm, open, unlink, type FileHandle } from 'n
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
-import { LegacyServerHost } from '../../src/compatibility/legacy-server-facade.js';
+import {
+  LegacyRconFacade,
+  LegacyServerHost
+} from '../../src/compatibility/legacy-server-facade.js';
 import { ConnectorRegistry } from '../../src/connectors/registry.js';
 import type { RconAuditEvent } from '../../src/domain/events.js';
 import { asEOSID } from '../../src/domain/identity.js';
@@ -35,6 +38,8 @@ class FakeRconServer extends EventEmitter {
   readonly commandCounts = new Map<string, number>();
   mode: 'normal' | 'silent' | 'drop' | 'malformed' = 'normal';
   authenticationMode: 'normal' | 'silent' = 'normal';
+  holdReplies = false;
+  readonly heldReplies: (() => void)[] = [];
   connections = 0;
   #sockets = new Set<Socket>();
 
@@ -106,8 +111,13 @@ class FakeRconServer extends EventEmitter {
     );
     const end = encodePacket(RCON_PACKET.response, RCON_PACKET.end, packet.count, '');
     const combined = Buffer.concat([chat, first, second, end]);
-    socket.write(combined.subarray(0, 7));
-    socket.write(combined.subarray(7));
+    const reply = () => {
+      if (socket.destroyed) return;
+      socket.write(combined.subarray(0, 7));
+      socket.write(combined.subarray(7));
+    };
+    if (this.holdReplies) this.heldReplies.push(reply);
+    else reply();
   }
 }
 
@@ -142,11 +152,11 @@ test('authenticates, serializes commands, combines responses, and separates chat
   try {
     await client.connect();
     assert.equal(client.state, 'ready');
-    const version = client.commandVersion;
+    const version = client.mutationVersion;
     const chat = onceWithTimeout<RconPacket>(client, 'chat');
     const first = client.execute('first');
     const second = client.execute('second');
-    assert.equal(client.commandVersion, version + 2);
+    assert.equal(client.mutationVersion, version + 2);
     assert.equal(await first, 'chunk one chunk two');
     assert.equal(await second, 'chunk one chunk two');
     assert.equal((await chat).body, 'unsolicited');
@@ -646,5 +656,101 @@ test('recorder overload is observable and slow disk never delays RCON completion
     await client.stop();
     await fake.close();
     await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('read-only polls and messages preserve mutation version while accepted mutators invalidate it', async () => {
+  const fake = new FakeRconServer();
+  const port = await fake.listen();
+  const client = new RconClient({
+    host: '127.0.0.1',
+    port,
+    password: 'fixture',
+    autoReconnect: false
+  });
+  try {
+    await client.connect();
+    const version = client.mutationVersion;
+    const polls = [
+      'ListPlayers',
+      'ListSquads',
+      'ListParties',
+      'ShowServerInfo',
+      'ShowCurrentMap',
+      'ShowNextMap',
+      'AdminBroadcast hello',
+      'AdminWarn "fixture" hello'
+    ].map((command) => client.execute(command));
+    assert.ok(client.queueDepth > 0);
+    assert.equal(client.mutationVersion, version);
+    await Promise.all(polls);
+    const mutation = client.execute('AdminForceTeamChange "fixture"');
+    assert.equal(client.mutationVersion, version + 1);
+    await mutation;
+    const unknown = client.execute('CustomServerCommand');
+    assert.equal(client.mutationVersion, version + 2);
+    await unknown;
+  } finally {
+    await client.stop();
+    await fake.close();
+  }
+});
+
+test('a queued team-change is cancelled at wire dispatch after its round ends', async () => {
+  const fake = new FakeRconServer();
+  const port = await fake.listen();
+  const client = new SquadRconClient({
+    host: '127.0.0.1',
+    port,
+    password: 'fixture',
+    autoReconnect: false
+  });
+  try {
+    await client.connect();
+    fake.holdReplies = true;
+    const poll = client.execute('ListPlayers');
+    await waitFor(() => fake.commandCounts.has('ListPlayers'));
+    let active = true;
+    const facade = new LegacyRconFacade(client);
+    const move = facade.switchTeam(asEOSID('00000000000000000000000000000001'), () => active);
+    const cancelled = assert.rejects(move, { name: 'RconCommandCancelledError' });
+    active = false;
+    fake.holdReplies = false;
+    fake.heldReplies.splice(0).forEach((reply) => reply());
+    await poll;
+    await cancelled;
+    assert.ok(
+      ![...fake.commandCounts.keys()].some((command) => command.startsWith('AdminForceTeamChange'))
+    );
+    assert.equal(client.queueDepth, 0);
+    await client.execute('ShowServerInfo');
+  } finally {
+    await client.stop();
+    await fake.close();
+  }
+});
+
+test('an already cancelled command does not consume the first wire sequence', async () => {
+  const fake = new FakeRconServer();
+  const port = await fake.listen();
+  const client = new RconClient({
+    host: '127.0.0.1',
+    port,
+    password: 'fixture',
+    autoReconnect: false
+  });
+  try {
+    await client.connect();
+    const version = client.mutationVersion;
+    await assert.rejects(
+      client.execute('AdminForceTeamChange "fixture"', () => false),
+      { name: 'RconCommandCancelledError' }
+    );
+    assert.equal(client.mutationVersion, version);
+    await client.execute('ListPlayers');
+    assert.deepEqual([...fake.commandCounts.keys()], ['ListPlayers']);
+  } finally {
+    await client.stop();
+    await fake.close();
   }
 });

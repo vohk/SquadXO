@@ -88,7 +88,7 @@ async function createPlugin(overrides: Record<string, unknown> = {}) {
       switchTeam(playerID: string): Promise<void>;
       getListPlayers(): Promise<Record<string, unknown>[]>;
       getSquads(): Promise<Record<string, unknown>[]>;
-      getCommandVersion?(): number | null;
+      getMutationVersion?(): number | null;
       warn(playerID: string, message: string): Promise<void>;
       broadcast(): Promise<void>;
     };
@@ -1179,7 +1179,6 @@ test('SmartSwitch final roster classifies pending departure after capacity refus
 });
 
 test('SmartSwitch optimized successful cycles use two per-move RCON calls plus fixed overhead', async (t) => {
-  t.mock.method(performance, 'now', () => 0);
   for (const population of [25, 50, 100]) {
     const { plugin, server } = await auditedContext(t);
     server.players = Array.from({ length: population }, (_, i) =>
@@ -1189,18 +1188,16 @@ test('SmartSwitch optimized successful cycles use two per-move RCON calls plus f
     plugin.sendDiscordMessage = async () => {};
     let version = 0;
     const counts = { listPlayers: 0, listSquads: 0, switchTeam: 0 };
-    server.rcon.getCommandVersion = () => version;
+    server.rcon.getMutationVersion = () => version;
     const listPlayers = server.rcon.getListPlayers;
     const listSquads = server.rcon.getSquads;
     const switchTeam = server.rcon.switchTeam;
     server.rcon.getListPlayers = async () => {
       counts.listPlayers++;
-      version++;
       return listPlayers();
     };
     server.rcon.getSquads = async () => {
       counts.listSquads++;
-      version++;
       return listSquads();
     };
     server.rcon.switchTeam = async (id) => {

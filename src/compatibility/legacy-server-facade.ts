@@ -528,18 +528,16 @@ export class LegacyRconFacade {
     return this.client.forceTeamChange(eosID);
   }
 
-  switchTeam(eosID: EOSID): Promise<void> {
-    return this.client.forceTeamChange(eosID);
+  switchTeam(eosID: EOSID, isActive?: () => boolean): Promise<void> {
+    return this.client.forceTeamChange(eosID, isActive);
   }
 
   async setFogOfWar(mode: number): Promise<void> {
     await this.client.execute(`AdminSetFogOfWar ${mode}`);
   }
 
-  getCommandVersion(): number | null {
-    return this.client.state === 'ready' && this.client.queueDepth === 0
-      ? this.client.commandVersion
-      : null;
+  getMutationVersion(): number | null {
+    return this.client.state === 'ready' ? this.client.mutationVersion : null;
   }
 
   getListPlayers(): ReturnType<SquadRconClient['listPlayers']> {

@@ -15,12 +15,17 @@ type Server = {
   rcon: {
     getListPlayers(): Promise<Player[]>;
     switchTeam(id: string): Promise<void>;
-    getCommandVersion?(): number | null;
+    getMutationVersion?(): number | null;
   };
 };
 const helper = (await import(pathToFileURL(resolve('squad-server/utils/team-switch.js')).href)) as {
   switchGroups(players: Player[], bySquad?: boolean): { players: Player[] }[];
-  readSwitchRoster(server: Server, previous?: Player[], current?: Player[]): Promise<Player[]>;
+  readSwitchRoster(
+    server: Server,
+    previous?: Player[],
+    current?: Player[],
+    operation?: object
+  ): Promise<Player[]>;
   moveToTeam(
     server: Server,
     players: Player[],
@@ -28,6 +33,7 @@ const helper = (await import(pathToFileURL(resolve('squad-server/utils/team-swit
     options?: {
       wholeParties?: boolean;
       initialRoster?: Player[];
+      operation?: object;
       onDeparted?: (player: Player) => void;
     }
   ): Promise<{ players: Player[]; moved: Set<string>; departed: Set<string> }>;
@@ -98,7 +104,7 @@ test('a lost acknowledgement succeeds only when the destination is observed', as
   );
   assert.equal(result.moved.size, 1);
 });
-test('empty, duplicate and incomplete rosters fail before a command', async () => {
+test('empty, duplicate and missing-target rosters fail before a command', async () => {
   for (const current of [
     [],
     [
@@ -355,75 +361,84 @@ test('a confirmed player returning to its source is stopped without a second com
   assert.deepEqual(calls, ['a', 'b']);
 });
 
-test('verified post-move rosters avoid the next redundant preflight query', async (t) => {
-  t.mock.method(performance, 'now', () => 0);
+test('verified post-move rosters are reused only by their owning operation', async () => {
   const players = ['a', 'b'].map((eosID) => ({ eosID, teamID: 1 }));
+  const operation = {};
   let version = 0;
   let reads = 0;
   const value = server(players, (id) => {
     version++;
     players.find((player) => player.eosID === id)!.teamID = 2;
   });
-  value.rcon.getCommandVersion = () => version;
+  value.rcon.getMutationVersion = () => version;
   value.rcon.getListPlayers = async () => {
-    version++;
     reads++;
     return players.map((player) => ({ ...player }));
   };
-  let current = await helper.readSwitchRoster(value);
+  let current = await helper.readSwitchRoster(value, [], undefined, operation);
   current = (
-    await helper.moveToTeam(value, [players[0]!], 2, { wholeParties: true, initialRoster: current })
-  ).players as Player[];
-  await helper.moveToTeam(value, [players[1]!], 2, { wholeParties: true, initialRoster: current });
-  assert.equal(reads, 3); // One initial read, one verification for each move.
+    await helper.moveToTeam(value, [players[0]!], 2, {
+      wholeParties: true,
+      initialRoster: current,
+      operation
+    })
+  ).players;
+  await helper.moveToTeam(value, [players[1]!], 2, {
+    wholeParties: true,
+    initialRoster: current,
+    operation
+  });
+  assert.equal(reads, 3);
 });
 
-test('intervening commands, busy connections and edited observations invalidate roster reuse', async (t) => {
-  t.mock.method(performance, 'now', () => 0);
-  for (const scenario of ['command', 'busy', 'edited', 'reconnect']) {
+test('mutating requests, connection loss, reconnects and another operation force a fresh baseline', async () => {
+  for (const scenario of ['mutation', 'disconnected', 'reconnect', 'other-operation']) {
     const players = [
       { eosID: 'a', teamID: 1, partyID: 0, isLeader: true },
       { eosID: 'b', teamID: 1, partyID: 0, isLeader: false }
     ];
+    const operation = {};
     let version = 0;
+    let disconnected = false;
     let reads = 0;
-    let busy = false;
     const commands: string[] = [];
     const value = server(players, (id) => {
       version++;
       commands.push(id);
       players.forEach((player) => (player.teamID = 2));
     });
-    value.rcon.getCommandVersion = () => (busy ? null : version);
+    value.rcon.getMutationVersion = () => (disconnected ? null : version);
     value.rcon.getListPlayers = async () => {
-      version++;
       reads++;
-      busy = false;
+      disconnected = false;
       return players.map((player) => ({ ...player }));
     };
-    const current = await helper.readSwitchRoster(value);
+    const current = await helper.readSwitchRoster(value, [], undefined, operation);
     players[0]!.isLeader = false;
     players[1]!.isLeader = true;
-    if (scenario === 'command' || scenario === 'reconnect') version++;
-    else if (scenario === 'busy') busy = true;
-    else current[0]!.isLeader = false;
+    if (scenario === 'mutation' || scenario === 'reconnect') version++;
+    else if (scenario === 'disconnected') disconnected = true;
     await helper.moveToTeam(
       value,
       players.map((player) => ({ ...player })),
       2,
-      { wholeParties: true, initialRoster: current }
+      {
+        wholeParties: true,
+        initialRoster: current,
+        operation: scenario === 'other-operation' ? {} : operation
+      }
     );
     assert.equal(reads, 3, scenario);
     assert.deepEqual(commands, ['b'], scenario);
   }
 });
 
-test('a command issued between reuse and dispatch forces a fresh leader check', async (t) => {
-  t.mock.method(performance, 'now', () => 0);
+test('a mutation issued between reuse and dispatch forces a fresh leader check', async () => {
   const players = [
     { eosID: 'a', teamID: 1, partyID: 0, isLeader: true },
     { eosID: 'b', teamID: 1, partyID: 0, isLeader: false }
   ];
+  const operation = {};
   let version = 0;
   let reads = 0;
   const commands: string[] = [];
@@ -432,18 +447,17 @@ test('a command issued between reuse and dispatch forces a fresh leader check', 
     commands.push(id);
     players.forEach((player) => (player.teamID = 2));
   });
-  value.rcon.getCommandVersion = () => version;
+  value.rcon.getMutationVersion = () => version;
   value.rcon.getListPlayers = async () => {
-    version++;
     reads++;
     return players.map((player) => ({ ...player }));
   };
-  const current = await helper.readSwitchRoster(value);
+  const current = await helper.readSwitchRoster(value, [], undefined, operation);
   const pending = helper.moveToTeam(
     value,
     players.map((player) => ({ ...player })),
     2,
-    { wholeParties: true, initialRoster: current }
+    { wholeParties: true, initialRoster: current, operation }
   );
   version++;
   players[0]!.isLeader = false;
@@ -453,13 +467,36 @@ test('a command issued between reuse and dispatch forces a fresh leader check', 
   assert.equal(reads, 3);
 });
 
-test('a roster older than 100ms is refreshed even without an intervening command', async (t) => {
-  let now = 0;
-  t.mock.method(performance, 'now', () => now);
+test('read-only polling does not invalidate an operation handoff', async () => {
+  const players = ['a', 'b'].map((eosID) => ({ eosID, teamID: 1 }));
+  const operation = {};
+  let version = 0;
+  let reads = 0;
+  const value = server(players, (id) => {
+    version++;
+    players.find((player) => player.eosID === id)!.teamID = 2;
+  });
+  value.rcon.getMutationVersion = () => version;
+  value.rcon.getListPlayers = async () => {
+    reads++;
+    return players.map((player) => ({ ...player }));
+  };
+  const current = await helper.readSwitchRoster(value, [], undefined, operation);
+  await value.rcon.getListPlayers(); // An intervening read leaves the mutation version unchanged.
+  await helper.moveToTeam(value, [players[0]!], 2, {
+    wholeParties: true,
+    initialRoster: current,
+    operation
+  });
+  assert.equal(reads, 3); // Initial read, background read, post-move verification.
+});
+
+test('a mutation during a roster query invalidates that query before dispatch', async () => {
   const players = [
     { eosID: 'a', teamID: 1, partyID: 0, isLeader: true },
     { eosID: 'b', teamID: 1, partyID: 0, isLeader: false }
   ];
+  const operation = {};
   let version = 0;
   let reads = 0;
   const commands: string[] = [];
@@ -468,22 +505,37 @@ test('a roster older than 100ms is refreshed even without an intervening command
     commands.push(id);
     players.forEach((player) => (player.teamID = 2));
   });
-  value.rcon.getCommandVersion = () => version;
+  value.rcon.getMutationVersion = () => version;
   value.rcon.getListPlayers = async () => {
-    version++;
     reads++;
-    return players.map((player) => ({ ...player }));
+    const response = players.map((player) => ({ ...player }));
+    if (reads === 1) {
+      version++;
+      players[0]!.isLeader = false;
+      players[1]!.isLeader = true;
+    }
+    return response;
   };
-  const current = await helper.readSwitchRoster(value);
-  now = 101;
-  players[0]!.isLeader = false;
-  players[1]!.isLeader = true;
+  const current = await helper.readSwitchRoster(value, [], undefined, operation);
   await helper.moveToTeam(
     value,
     players.map((player) => ({ ...player })),
     2,
-    { wholeParties: true, initialRoster: current }
+    { wholeParties: true, initialRoster: current, operation }
   );
-  assert.equal(reads, 3);
   assert.deepEqual(commands, ['b']);
+  assert.equal(reads, 3);
+});
+
+test('an unrelated departure from the periodic cache does not block a present requested player', async () => {
+  const players = [{ eosID: 'present', teamID: 1 }];
+  const calls: string[] = [];
+  const value = server(players, (id) => {
+    calls.push(id);
+    players[0]!.teamID = 2;
+  });
+  value.players = [...players, { eosID: 'departed', teamID: 1 }];
+  const result = await helper.moveToTeam(value, [players[0]!], 2);
+  assert.deepEqual(calls, ['present']);
+  assert.deepEqual([...result.moved], ['present']);
 });
