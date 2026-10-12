@@ -136,3 +136,52 @@ test('README, migration and plugin reference link to existing local files', asyn
     }
   }
 });
+
+test('every plugin reference retains its tables and a matching copyable JSON config', async () => {
+  const config = await generator.buildConfig();
+  const first = await generator.buildReference();
+  assert.equal(await generator.buildReference(), first);
+  for (const entry of config.plugins) {
+    const named = entry as GeneratedNativeConfig & { plugin?: string; type?: string };
+    const name = named.type === 'native' ? named.name : named.plugin;
+    const section = first.split(`### ${name}\n`)[1]?.split('\n### ')[0];
+    assert.ok(section, String(name));
+    const block = section.match(/```json\n([\s\S]*?)\n```/);
+    assert.ok(block, `${name}: JSON block`);
+    assert.deepEqual(JSON.parse(block[1]!), JSON.parse(JSON.stringify(entry)));
+    const options =
+      named.type === 'native'
+        ? entry.options
+        : Object.fromEntries(
+            Object.entries(entry).filter(([key]) => !['plugin', 'enabled', 'module'].includes(key))
+          );
+    for (const key of Object.keys(options))
+      assert.ok(section.includes(`| \`${key}\` |`), `${name}: ${key} table row`);
+    if (named.type === 'native') assert.equal(entry.enabled, false);
+  }
+});
+
+test('JSON examples preserve nested regex patterns and redact credential defaults', async () => {
+  class Fixture {
+    static defaultEnabled = false;
+    static optionsSpecification = {
+      rules: { default: [{ type: 'regex', rule: /[a-z]+/ }], description: 'Rules.' },
+      apiToken: { default: 'fixture-secret', description: 'Token.' }
+    };
+  }
+  const overrides = {
+    legacy: { Fixture: Fixture as never },
+    native: [],
+    template: { plugins: [] }
+  };
+  const config = await generator.buildConfig(overrides);
+  assert.deepEqual(config.plugins[0], {
+    plugin: 'Fixture',
+    enabled: false,
+    rules: [{ type: 'regex', rule: '[a-z]+' }],
+    apiToken: ''
+  });
+  const reference = await generator.buildReference(overrides);
+  assert.ok(reference.includes('"rule": "[a-z]+"'));
+  assert.ok(!reference.includes('fixture-secret'));
+});

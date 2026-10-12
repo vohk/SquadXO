@@ -94,6 +94,7 @@ export class RconClient extends EventEmitter {
   #authenticationCount = 0;
   #nextCount = 1;
   #nextRequestID = 1;
+  #commandVersion = 0;
   readonly #auditObservers = new Set<(event: RconAuditEvent) => void>();
   #activeCommand: PendingCommand | undefined;
   readonly #queue: PendingCommand[] = [];
@@ -132,6 +133,11 @@ export class RconClient extends EventEmitter {
     return this.#state;
   }
 
+  /** Invalidates immediately reusable roster observations on commands and reconnects. */
+  get commandVersion(): number {
+    return this.#commandVersion;
+  }
+
   get queueDepth(): number {
     return this.#queue.length + (this.#activeCommand ? 1 : 0);
   }
@@ -160,6 +166,7 @@ export class RconClient extends EventEmitter {
   }
 
   execute(command: string): Promise<string> {
+    this.#commandVersion++;
     const audit: CommandAudit = {
       requestID: this.#nextRequestID++,
       requestedAt: new Date(),
@@ -241,6 +248,7 @@ export class RconClient extends EventEmitter {
     if (socket !== this.#socket || this.#state !== 'connecting') return;
     this.#clearTimer('connect');
     this.#setState('authenticating');
+    this.#commandVersion++;
     // Squad's implementation expects the first command to reuse the authentication sequence.
     this.#authenticationCount = this.#nextCount;
     socket.write(

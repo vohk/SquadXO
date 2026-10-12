@@ -46,3 +46,11 @@ test('legacy broadcasts expire instead of being replayed after a long outage', a
   assert.deepEqual(rcon.broadcasts, []);
   assert.equal(rcon.listenerCount('state'), 0);
 });
+
+test('roster versions are available only on an idle ready connection', () => {
+  const client = new RecoveringRcon();
+  const facade = new LegacyRconFacade(client);
+  assert.equal(facade.getCommandVersion(), null);
+  client.recover();
+  assert.equal(facade.getCommandVersion(), client.commandVersion);
+});

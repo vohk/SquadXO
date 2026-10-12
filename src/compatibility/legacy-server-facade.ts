@@ -536,6 +536,12 @@ export class LegacyRconFacade {
     await this.client.execute(`AdminSetFogOfWar ${mode}`);
   }
 
+  getCommandVersion(): number | null {
+    return this.client.state === 'ready' && this.client.queueDepth === 0
+      ? this.client.commandVersion
+      : null;
+  }
+
   getListPlayers(): ReturnType<SquadRconClient['listPlayers']> {
     return this.client.listPlayers();
   }

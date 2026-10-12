@@ -100,6 +100,12 @@ export default class SmartSwitch extends DiscordBasePlugin {
           'When enabled, performs database validation but skips any actual team balancing actions.',
         default: false
       },
+      shuffleEnabled: {
+        required: false,
+        description:
+          'Enable queued and automatic shuffles and their balancing. Manual player/squad switches and their queues remain available.',
+        default: true
+      },
       consecutiveWinsThreshold: {
         required: false,
         description: 'Number of consecutive round wins before triggering reshuffle.',
@@ -176,8 +182,8 @@ export default class SmartSwitch extends DiscordBasePlugin {
     this.active = false;
     this.roundEndOperation = null;
     this.switchOperation = Promise.resolve();
-    this.shufflePlan = null;
-    this.pendingBalanceMove = null;
+    this.roundGeneration = 0;
+    this.handledRound = null;
 
     this.queuedSquads = [];
     this.queuedShuffle = false;
@@ -225,6 +231,7 @@ export default class SmartSwitch extends DiscordBasePlugin {
     this.onPlayerDisconnected = this.onPlayerDisconnected.bind(this);
     this.onPlayerConnected = this.onPlayerConnected.bind(this);
     this.onRoundEnded = this.onRoundEnded.bind(this);
+    this.onNewGame = this.onNewGame.bind(this);
   }
 
   scheduleRecentShuffleClear() {
@@ -303,6 +310,7 @@ export default class SmartSwitch extends DiscordBasePlugin {
     this.server.on('PLAYER_DISCONNECTED', this.onPlayerDisconnected);
     this.server.on('PLAYER_CONNECTED', this.onPlayerConnected);
     this.server.on('ROUND_ENDED', this.onRoundEnded);
+    this.server.on('NEW_GAME', this.onNewGame);
     this.active = true;
   }
 
@@ -312,6 +320,7 @@ export default class SmartSwitch extends DiscordBasePlugin {
     this.server.removeEventListener('PLAYER_DISCONNECTED', this.onPlayerDisconnected);
     this.server.removeEventListener('PLAYER_CONNECTED', this.onPlayerConnected);
     this.server.removeEventListener('ROUND_ENDED', this.onRoundEnded);
+    this.server.removeEventListener('NEW_GAME', this.onNewGame);
     this.clearRecentShuffle();
     for (const timeout of this.rejoinTimeouts) clearTimeout(timeout);
     this.rejoinTimeouts.clear();
@@ -415,6 +424,10 @@ export default class SmartSwitch extends DiscordBasePlugin {
           );
           break;
         case 'queueshuffle':
+          if (!this.options.shuffleEnabled) {
+            await this.warn(playerID, 'Smart shuffle is disabled by configuration');
+            break;
+          }
           this.queuedShuffle = true;
           this.consecutiveWins = 0;
           this.lastWinnerTeam = null;
@@ -586,12 +599,13 @@ export default class SmartSwitch extends DiscordBasePlugin {
     else collection.push({ playerID, datetime: new Date() });
   }
 
-  movePlayers(players, teamID, cooldown = false) {
+  movePlayers(players, teamID, cooldown = false, options = {}) {
     const operation = this.switchOperation
       .catch(() => {})
       .then(() =>
         moveToTeam(this.server, players, teamID, {
-          isActive: () => this.active,
+          ...options,
+          isActive: () => this.active && (options.isActive?.() ?? true),
           onMoved: (player) => {
             this.swappedPlayers.add(player.eosID);
             if (cooldown) this.recordSwitch(player.eosID);
@@ -651,7 +665,7 @@ export default class SmartSwitch extends DiscordBasePlugin {
       await this.warn(senderPlayerID, 'Player has been double-switched');
   }
 
-  async switchPlayer(playerID, targetTeamID, cooldown = false) {
+  async switchPlayer(playerID, targetTeamID, cooldown = false, options = {}) {
     if (!playerID || !this.active)
       throw new Error('Team change stopped because the plugin is inactive');
     const roster = await readSwitchRoster(this.server);
@@ -659,7 +673,12 @@ export default class SmartSwitch extends DiscordBasePlugin {
     if (!player) throw new Error('Player is not present in the current roster');
     const group =
       player.teamID === targetTeamID ? [player] : this.getRequestedPlayers(player, roster);
-    return this.movePlayers(group, targetTeamID ?? (player.teamID === 1 ? 2 : 1), cooldown);
+    return this.movePlayers(
+      group,
+      targetTeamID ?? (player.teamID === 1 ? 2 : 1),
+      cooldown,
+      options
+    );
   }
 
   async switchSquad(number, team) {
@@ -799,8 +818,6 @@ export default class SmartSwitch extends DiscordBasePlugin {
   }
 
   async clearAllQueues() {
-    this.shufflePlan = null;
-    this.pendingBalanceMove = null;
     this.queuedSquads = [];
     this.queuedShuffle = false;
     this.consecutiveWins = 0;
@@ -808,34 +825,50 @@ export default class SmartSwitch extends DiscordBasePlugin {
     await this.models.Endmatch.destroy({ where: {} });
   }
 
+  onNewGame() {
+    this.roundGeneration++;
+  }
+
   async onRoundEnded(info) {
     if (this.roundEndOperation) return this.roundEndOperation;
+    const round = info.time != null ? String(info.time) : this.roundGeneration;
+    if (this.handledRound === round) return;
+    this.handledRound = round;
     this.roundEndOperation = this.processRoundEnded(info).finally(() => {
       this.roundEndOperation = null;
     });
     return this.roundEndOperation;
   }
 
-  async processRoundEnded(info) {
+  async processRoundEnded(info, generation = this.roundGeneration) {
+    const isActive = () => this.active && this.roundGeneration === generation;
     if (!this.active) return;
     if (this.options.testMode) {
       await this.verifyDatabaseStructure();
       return;
     }
+    const manualShuffle = this.queuedShuffle;
+    this.queuedShuffle = false;
     try {
-      const roster = await readSwitchRoster(this.server);
-      this.prepareQueuedSquads(roster);
-      await this.prepareQueuedPlayerTargets(roster);
-      const shuffleTriggered = await this.maybeShuffleOnRoundEnd(info);
+      const roster = await readSwitchRoster(this.server, []);
+      if (isActive()) this.prepareQueuedSquads(roster);
+      if (isActive()) await this.prepareQueuedPlayerTargets(roster, isActive);
+    } catch (error) {
+      this.verbose(1, `Queue preparation deferred: ${error.message}`);
+    }
+    try {
+      const shuffleTriggered = await this.maybeShuffleOnRoundEnd(info, manualShuffle, generation);
       if (shuffleTriggered) {
-        await this.clearCompletedQueues(await readSwitchRoster(this.server));
-        this.scheduleRecentShuffleClear();
+        if (isActive()) {
+          const roster = await readSwitchRoster(this.server, []);
+          if (isActive()) await this.clearCompletedQueues(roster, isActive);
+        }
         return;
       }
-      if (this.queuedShuffle || !(await this.announceQueuedMatchEndSwitches())) return;
+      if (!isActive() || !(await this.announceQueuedMatchEndSwitches()) || !isActive()) return;
       const destinations = new Map();
-      await this.executeQueuedPlayerSwitches(destinations);
-      await this.executeQueuedSquadSwitches(destinations);
+      await this.executeQueuedPlayerSwitches(destinations, isActive);
+      if (isActive()) await this.executeQueuedSquadSwitches(destinations, isActive);
     } catch (error) {
       this.verbose(1, `Round-end switches paused; queues retained: ${error.message}`);
     }
@@ -854,9 +887,10 @@ export default class SmartSwitch extends DiscordBasePlugin {
     }
   }
 
-  async prepareQueuedPlayerTargets(roster) {
+  async prepareQueuedPlayerTargets(roster, isActive = () => this.active) {
     const rows = await this.models.Endmatch.findAll();
     for (const row of rows) {
+      if (!isActive()) break;
       if (row.targetTeamID != null) continue;
       const player = roster.find(
         (p) => p.eosID === row.eosID || (row.steamID && p.steamID === row.steamID)
@@ -867,13 +901,15 @@ export default class SmartSwitch extends DiscordBasePlugin {
     return rows;
   }
 
-  async clearCompletedQueues(roster) {
+  async clearCompletedQueues(roster, isActive = () => this.active) {
     for (const row of await this.models.Endmatch.findAll()) {
+      if (!isActive()) return;
       const player = roster.find(
         (p) => p.eosID === row.eosID || (row.steamID && p.steamID === row.steamID)
       );
       if (player && player.teamID === row.targetTeamID) await row.destroy();
     }
+    if (!isActive()) return;
     this.queuedSquads = this.queuedSquads.filter(
       (squad) =>
         !squad.players?.length ||
@@ -924,11 +960,13 @@ export default class SmartSwitch extends DiscordBasePlugin {
     return queuedPlayers;
   }
 
-  async executeQueuedPlayerSwitches(destinations = new Map()) {
-    if (!this.active) return;
+  async executeQueuedPlayerSwitches(destinations = new Map(), isActive = () => this.active) {
+    if (!isActive()) return;
     const roster = await readSwitchRoster(this.server);
-    const rows = await this.prepareQueuedPlayerTargets(roster);
+    if (!isActive()) return;
+    const rows = await this.prepareQueuedPlayerTargets(roster, isActive);
     for (const row of rows) {
+      if (!isActive()) return;
       const player = roster.find(
         (p) => p.eosID === row.eosID || (row.steamID && p.steamID === row.steamID)
       );
@@ -936,21 +974,22 @@ export default class SmartSwitch extends DiscordBasePlugin {
       const destination = destinations.get(player.eosID) ?? row.targetTeamID;
       destinations.set(player.eosID, destination);
       try {
-        await this.switchPlayer(player.eosID, destination, true);
-        await row.destroy();
+        await this.switchPlayer(player.eosID, destination, true, { isActive });
+        if (isActive()) await row.destroy();
       } catch (error) {
         this.verbose(1, `Queued switch retained: ${error.message}`);
       }
     }
   }
 
-  async executeQueuedSquadSwitches(destinations = new Map()) {
-    if (!this.active || this.queuedSquads.length === 0) return;
+  async executeQueuedSquadSwitches(destinations = new Map(), isActive = () => this.active) {
+    if (!isActive() || this.queuedSquads.length === 0) return;
     const roster = await readSwitchRoster(this.server);
+    if (!isActive()) return;
     this.prepareQueuedSquads(roster);
     const remaining = [];
     for (const squad of this.queuedSquads) {
-      if (!squad.players?.length) {
+      if (!isActive() || !squad.players?.length) {
         remaining.push(squad);
         continue;
       }
@@ -961,7 +1000,7 @@ export default class SmartSwitch extends DiscordBasePlugin {
         if (squad.players.some((player) => destinations.get(player.eosID) !== squad.targetTeamID)) {
           throw new Error('Queued destinations conflict');
         }
-        await this.movePlayers(squad.players, squad.targetTeamID, true);
+        await this.movePlayers(squad.players, squad.targetTeamID, true, { isActive });
       } catch (error) {
         remaining.push(squad);
         this.verbose(1, `Queued squad retained: ${error.message}`);
@@ -970,17 +1009,26 @@ export default class SmartSwitch extends DiscordBasePlugin {
     this.queuedSquads = remaining;
   }
 
-  async maybeShuffleOnRoundEnd(info) {
+  async maybeShuffleOnRoundEnd(
+    info,
+    manualShuffle = this.queuedShuffle,
+    generation = this.roundGeneration
+  ) {
+    if (!this.options.shuffleEnabled) {
+      this.queuedShuffle = false;
+      this.consecutiveWins = 0;
+      this.lastWinnerTeam = null;
+      return false;
+    }
     this.currentMatchId = null;
     this.teamStats = {
       team1: { tickets: 0, kills: 0, wounds: 0, teamkills: 0, revives: 0 },
       team2: { tickets: 0, kills: 0, wounds: 0, teamkills: 0, revives: 0 }
     };
 
-    if (this.queuedShuffle) {
-      const completed = await this.runSmartShuffle(info, true, 'Manual');
-      if (completed) this.queuedShuffle = false;
-      return completed;
+    if (manualShuffle) {
+      this.queuedShuffle = false;
+      return this.runSmartShuffle(info, true, 'Manual', generation);
     }
 
     let excludedLayers = [];
@@ -1082,34 +1130,199 @@ export default class SmartSwitch extends DiscordBasePlugin {
       );
     }
 
-    return this.runSmartShuffle(info, false, ticketDifferenceStr);
+    return this.runSmartShuffle(info, false, ticketDifferenceStr, generation);
   }
 
-  async runSmartShuffle(info, isManual, ticketDifferenceStr) {
-    const currentWinTeam = parseInt(info.winner?.team, 10);
-    if (this.options.showBroadcasts)
-      await this.broadcast(`Reshuffling groups in ${this.options.shuffleDelaySeconds} seconds.`);
-    if (!(await this.wait(this.options.shuffleDelaySeconds * 1000))) return false;
+  async runSmartShuffle(info, isManual, ticketDifferenceStr, generation = this.roundGeneration) {
+    if (!this.options.shuffleEnabled) return false;
+    const started = performance.now();
+    let movementStarted;
+    const summary = {
+      trigger: isManual ? 'queued' : 'automatic',
+      planned: 0,
+      moved: 0,
+      skipped: 0,
+      failed: 0,
+      departed: 0,
+      groups: []
+    };
     const switchedSquads = { team1: [], team2: [] };
-    if (!this.shufflePlan) this.swappedPlayers.clear();
+    const excluded = new Set();
+    const originalTeams = new Map();
+    this.swappedPlayers.clear();
+    const isActive = () => this.active && this.roundGeneration === generation;
     try {
-      await this.randomizeSquads(switchedSquads);
-      await this.autoBalanceTeams();
-      this.shufflePlan = null;
-      if (this.swappedPlayers.size === 0) return false;
-      await this.sendReshuffleReport(
-        Number.isNaN(currentWinTeam) ? null : currentWinTeam,
-        ticketDifferenceStr || 'N/A',
-        switchedSquads,
-        info
+      if (!isActive()) return true;
+      if (this.options.showBroadcasts)
+        await this.broadcast(`Reshuffling groups in ${this.options.shuffleDelaySeconds} seconds.`);
+      if (!(await this.wait(this.options.shuffleDelaySeconds * 1000)) || !isActive()) return true;
+      movementStarted = performance.now();
+      await this.randomizeSquads(switchedSquads, summary, excluded, isActive, originalTeams);
+      if (isActive()) await this.autoBalanceTeams(summary, excluded, isActive);
+    } catch (error) {
+      summary.error = error.message;
+    } finally {
+      if (movementStarted !== undefined)
+        summary.movementDurationMs = Math.round(performance.now() - movementStarted);
+      const plannedIDs = new Set(summary.groups.flatMap((group) => group.players));
+      const movedIDs = new Set([...this.swappedPlayers].filter((id) => plannedIDs.has(id)));
+      const departedIDs = new Set(
+        summary.groups.flatMap((group) => group.departed ?? []).filter((id) => !movedIDs.has(id))
       );
+      for (const group of summary.groups) {
+        const observed = group.players.filter((id) => movedIDs.has(id)).length;
+        if (observed > (group.moved ?? 0) && group.outcome === 'skipped') {
+          group.outcome = 'failed';
+          group.reason = `Unexpectedly moved before its command; ${group.reason}`;
+        }
+        group.moved = observed;
+      }
+      const unplannedMoved = [...this.swappedPlayers].filter((id) => !plannedIDs.has(id));
+      if (unplannedMoved.length) summary.unplannedMoved = unplannedMoved;
+      if (originalTeams.size) {
+        try {
+          const finalPlayers = await readSwitchRoster(this.server, []);
+          const finalIDs = new Set(finalPlayers.map((player) => player.eosID));
+          for (const id of plannedIDs) {
+            if (!movedIDs.has(id) && !finalIDs.has(id)) departedIDs.add(id);
+          }
+          for (const group of summary.groups) {
+            group.departed = [
+              ...new Set([
+                ...(group.departed ?? []),
+                ...group.players.filter((id) => departedIDs.has(id))
+              ])
+            ];
+            if (group.players.every((id) => departedIDs.has(id))) {
+              group.outcome = 'departed';
+              group.reason = `${group.reason ?? 'No surviving planned targets'}; absence confirmed in final roster`;
+            }
+          }
+
+          summary.teams = Object.fromEntries(
+            [1, 2].map((teamID) => {
+              const initial = [...originalTeams.values()].filter((team) => team === teamID).length;
+              const moved = [...this.swappedPlayers].filter(
+                (id) => originalTeams.get(id) === teamID
+              ).length;
+              const final = finalPlayers.filter((player) => player.teamID === teamID).length;
+              return [
+                `team${teamID}`,
+                {
+                  initial,
+                  moved,
+                  movedFraction: initial ? Math.round((moved / initial) * 1000) / 1000 : 0,
+                  final
+                }
+              ];
+            })
+          );
+          summary.finalGap = Math.abs(summary.teams.team1.final - summary.teams.team2.final);
+          summary.departedSincePlan = [...originalTeams.keys()].filter(
+            (id) => !finalPlayers.some((player) => player.eosID === id)
+          ).length;
+          summary.joinedSincePlan = finalPlayers.filter(
+            (player) => !originalTeams.has(player.eosID)
+          ).length;
+        } catch (error) {
+          summary.metricsError = error.message;
+        }
+      }
+      const failedIDs = new Set(
+        summary.groups
+          .filter((group) => group.outcome === 'failed')
+          .flatMap((group) => group.players)
+          .filter((id) => !movedIDs.has(id) && !departedIDs.has(id))
+      );
+      summary.moved = movedIDs.size;
+      summary.departed = departedIDs.size;
+      summary.failed = failedIDs.size;
+      summary.skipped = [...plannedIDs].filter(
+        (id) => !movedIDs.has(id) && !departedIDs.has(id) && !failedIDs.has(id)
+      ).length;
+      summary.cancelled = !isActive();
+      if (summary.moved > 0 && isActive()) this.scheduleRecentShuffleClear();
+      try {
+        const winner = parseInt(info.winner?.team, 10);
+        await this.sendReshuffleReport(
+          Number.isNaN(winner) ? null : winner,
+          ticketDifferenceStr || 'N/A',
+          switchedSquads,
+          summary
+        );
+      } catch (error) {
+        summary.reportError = error.message;
+      }
+      try {
+        await this.sendShuffleOutcome(summary);
+      } catch (error) {
+        summary.reportError = [summary.reportError, error.message].filter(Boolean).join('; ');
+      }
       this.consecutiveWins = 0;
       this.lastWinnerTeam = null;
-      return true;
-    } catch (error) {
-      if (this.swappedPlayers.size > 0) this.scheduleRecentShuffleClear();
-      this.verbose(1, `Shuffle stopped; pending requests retained: ${error.message}`);
-      return false;
+      summary.durationMs = Math.round(performance.now() - started);
+      const { groups, ...totals } = summary;
+      const issues = groups.filter((group) => group.reason || group.departed?.length);
+      this.verbose(1, `Shuffle finished: ${JSON.stringify({ ...totals, issues })}`);
+    }
+    // A shuffle attempt consumes this round even if every group was skipped.
+    return true;
+  }
+
+  async sendShuffleOutcome(summary) {
+    const details = summary.groups
+      .filter((group) => group.reason || group.departed?.length)
+      .map(
+        (group) =>
+          `Team ${group.teamID}, ${group.partyID == null ? 'group' : `party #${group.partyID}`} (${group.players.length} players): ${group.outcome}; ${group.reason ?? 'survivors moved'}${group.departed?.length ? `; departed: ${group.departed.join(', ')}` : ''}`
+      );
+    if (summary.error) details.push(`Attempt stopped: ${summary.error}`);
+    if (summary.cancelled) details.push('Attempt cancelled: plugin stopped or next round started.');
+    if (summary.reportError) details.push(`Detailed report failed: ${summary.reportError}`);
+    if (summary.teams) {
+      for (const teamID of [1, 2]) {
+        const team = summary.teams[`team${teamID}`];
+        details.push(
+          `Team ${teamID}: ${team.moved}/${team.initial} original players moved (${Math.round(team.movedFraction * 100)}%); final size ${team.final}.`
+        );
+      }
+      details.push(
+        `Final size gap: ${summary.finalGap}. Joins since planning: ${summary.joinedSincePlan}; departures: ${summary.departedSincePlan}.`
+      );
+      if (summary.finalGap > 1)
+        details.push(
+          'Residual gap: no remaining safe whole party or eligible player could improve it, or the attempt was stopped.'
+        );
+      if (
+        [1, 2].some((teamID) => Math.abs(summary.teams[`team${teamID}`].movedFraction - 0.5) > 0.2)
+      )
+        details.push(
+          'Movement differs from half: whole-group sizes, departures or skipped/failed targets constrained this attempt.'
+        );
+    }
+    if (summary.metricsError)
+      details.push(`Final roster metrics unavailable: ${summary.metricsError}`);
+    const chunks = [''];
+    for (const detail of details) {
+      // Keep every field below Discord's 1024-character limit.
+      const line = detail.replace(/[`*_~|]/g, '').slice(0, 950);
+      if (chunks[chunks.length - 1].length + line.length + 1 > 1000) chunks.push('');
+      chunks[chunks.length - 1] += `${line}\n`;
+    }
+    for (const [index, chunk] of chunks.entries()) {
+      await this.sendDiscordMessage({
+        allowedMentions: { parse: [] },
+        embed: {
+          title: index === 0 ? 'Shuffle results' : 'Shuffle results (continued)',
+          color: details.length ? 15158332 : this.options.color,
+          description:
+            index === 0
+              ? `Trigger: ${summary.trigger}. Planned: ${summary.planned}; confirmed moved: ${summary.moved}; departed without a confirmed move: ${summary.departed}; skipped: ${summary.skipped}; failed: ${summary.failed}.`
+              : undefined,
+          fields: chunk ? [{ name: 'Movement and limitations', value: chunk }] : [],
+          timestamp: new Date()
+        }
+      });
     }
   }
 
@@ -1464,58 +1677,218 @@ export default class SmartSwitch extends DiscordBasePlugin {
     }
   }
 
-  async randomizeSquads(switchedSquads) {
-    if (!this.shufflePlan) {
-      const players = await readSwitchRoster(this.server);
-      const groups = switchGroups(players);
-      const target = Math.floor(
-        Math.min(
-          players.filter((p) => p.teamID === 1).length,
-          players.filter((p) => p.teamID === 2).length
-        ) / 2
+  async moveShuffleGroup(
+    group,
+    teamID,
+    summary,
+    excluded,
+    isActive,
+    countPlanned = true,
+    phase = 'shuffle',
+    initialRoster
+  ) {
+    const ids = group.players.map((player) => player.eosID);
+    const departed = new Set();
+    let checkedPlayers;
+    if (countPlanned) summary.planned += ids.length;
+    const result = {
+      phase,
+      teamID: group.teamID,
+      targetTeamID: teamID,
+      partyID: group.partyID ?? null,
+      players: ids
+    };
+    try {
+      const change = await this.movePlayers(group.players, teamID, true, {
+        wholeParties: true,
+        initialRoster,
+        isActive,
+        onDeparted: (player) => departed.add(player.eosID)
+      });
+      checkedPlayers = change.players;
+      result.moved = ids.filter((id) => this.swappedPlayers.has(id)).length;
+      const alreadyAtDestination = ids.filter(
+        (id) => !this.swappedPlayers.has(id) && !departed.has(id)
       );
-      await this.calculateSquadScores(groups);
-      const plan = [];
-      for (const teamID of [1, 2]) {
-        const selected = groups
-          .filter((group) => group.teamID === teamID)
-          .sort((a, b) => (b.performanceScore || 0) - (a.performanceScore || 0));
-        let selectedCount = 0;
-        for (const group of selected) {
-          if (selectedCount >= target) break;
-          plan.push({ ...group, targetTeamID: teamID === 1 ? 2 : 1 });
-          selectedCount += group.players.length;
+      summary.skipped += alreadyAtDestination.length;
+      alreadyAtDestination.forEach((id) => excluded.add(id));
+      result.outcome =
+        result.moved > 0 ? 'moved' : departed.size === ids.length ? 'departed' : 'skipped';
+      if (alreadyAtDestination.length) result.reason = 'Already at destination; no command sent';
+      else if (result.outcome === 'departed') result.reason = 'No surviving planned targets';
+    } catch (error) {
+      result.reason = error.message;
+      result.moved = ids.filter((id) => this.swappedPlayers.has(id)).length;
+      result.outcome = error.stopShuffle || result.moved > 0 ? 'failed' : 'skipped';
+      summary[result.outcome] += ids.filter(
+        (id) => !this.swappedPlayers.has(id) && !departed.has(id)
+      ).length;
+      ids.forEach((id) => excluded.add(id));
+      if (error.stopShuffle) throw error;
+    } finally {
+      result.departed = [...departed];
+      summary.departed =
+        (summary.departed ?? 0) + [...departed].filter((id) => !this.swappedPlayers.has(id)).length;
+      departed.forEach((id) => excluded.add(id));
+      summary.groups.push(result);
+    }
+    return { completed: result.outcome === 'moved', players: checkedPlayers };
+  }
+
+  async randomizeSquads(
+    switchedSquads,
+    summary = { planned: 0, skipped: 0, failed: 0, groups: [] },
+    excluded = new Set(),
+    isActive = () => this.active,
+    originalTeams = new Map()
+  ) {
+    if (!this.options.shuffleEnabled) return;
+    const players = await readSwitchRoster(this.server, []);
+    players.forEach((player) => originalTeams.set(player.eosID, player.teamID));
+    const groups = switchGroups(players);
+    const target = Math.floor(
+      Math.min(
+        players.filter((p) => p.teamID === 1).length,
+        players.filter((p) => p.teamID === 2).length
+      ) / 2
+    );
+    await this.calculateSquadScores(groups);
+    const plan = [];
+    for (const teamID of [1, 2]) {
+      const selected = groups
+        .filter((group) => group.teamID === teamID)
+        .sort((a, b) => (b.performanceScore || 0) - (a.performanceScore || 0));
+      // Pick whole groups nearest the original half-smaller-team target, retaining
+      // score order as the tie-breaker between subsets of the same size.
+      const choices = new Map([[0, []]]);
+      for (const group of selected) {
+        for (const [count, subset] of [...choices]) {
+          const total = count + group.players.length;
+          const candidate = [...subset, group];
+          const score = (items) =>
+            items.reduce((sum, item) => sum + (item.performanceScore || 0), 0);
+          if (!choices.has(total) || score(candidate) > score(choices.get(total)))
+            choices.set(total, candidate);
         }
       }
-      this.shufflePlan = plan;
+      const counts = [...choices.keys()]
+        .filter((count) => count > 0)
+        .sort((a, b) => Math.abs(a - target) - Math.abs(b - target) || b - a);
+      const chosen = (choices.get(counts[0]) ?? []).map((group) => ({
+        ...group,
+        players: [...group.players]
+      }));
+      const desired = Math.max(1, target);
+      let count = chosen.reduce((total, group) => total + group.players.length, 0);
+      // Ordinary squads may supply a partial selection to hit the target; parties cannot.
+      for (const group of [...chosen].reverse()) {
+        if (count <= desired) break;
+        if (group.partyID != null) continue;
+        const trim = Math.min(count - desired, group.players.length);
+        group.players.splice(group.players.length - trim, trim);
+        count -= trim;
+      }
+      const selectedIDs = new Set(
+        chosen.flatMap((group) => group.players.map((player) => player.eosID))
+      );
+      for (const group of selected) {
+        if (count >= desired) break;
+        if (group.partyID != null) continue;
+        const extra = group.players
+          .filter((player) => !selectedIDs.has(player.eosID))
+          .slice(0, desired - count);
+        if (extra.length) chosen.push({ ...group, players: extra });
+        extra.forEach((player) => selectedIDs.add(player.eosID));
+        count += extra.length;
+      }
+      for (const group of chosen.filter((group) => group.players.length)) {
+        // Interleave individual non-party commands to avoid filling one team first.
+        const batches =
+          group.partyID != null ? [group.players] : group.players.map((player) => [player]);
+        for (const batch of batches)
+          plan.push({ ...group, players: batch, targetTeamID: teamID === 1 ? 2 : 1 });
+      }
     }
-    for (const group of this.shufflePlan) {
-      await this.movePlayers(group.players, group.targetTeamID, true);
-      switchedSquads[`team${group.teamID}`].push(String(group.squadID));
+    summary.planned += plan.reduce((count, group) => count + group.players.length, 0);
+    const remaining = [...plan];
+    let current;
+    while (remaining.length) {
+      try {
+        if (!isActive())
+          throw Object.assign(new Error('Next round started or plugin stopped'), {
+            stopShuffle: true
+          });
+        current ??= await readSwitchRoster(this.server, []);
+        if (!isActive())
+          throw Object.assign(new Error('Next round started or plugin stopped'), {
+            stopShuffle: true
+          });
+        const difference = this.getTeamBalanceDifference(current);
+        const projectedGap = (group) => {
+          const size = group.players.filter((target) =>
+            current.some(
+              (player) => player.eosID === target.eosID && player.teamID === group.teamID
+            )
+          ).length;
+          return Math.abs(difference + (group.teamID === 1 ? -2 : 2) * size);
+        };
+        remaining.sort((a, b) => projectedGap(a) - projectedGap(b));
+        const group = remaining.shift();
+        const execution = await this.moveShuffleGroup(
+          group,
+          group.targetTeamID,
+          summary,
+          excluded,
+          isActive,
+          false,
+          'shuffle',
+          current
+        );
+        current = execution.players;
+        if (
+          execution.completed &&
+          !switchedSquads[`team${group.teamID}`].includes(String(group.squadID))
+        )
+          switchedSquads[`team${group.teamID}`].push(String(group.squadID));
+      } catch (error) {
+        for (const pending of remaining) {
+          summary.skipped += pending.players.length;
+          pending.players.forEach((p) => excluded.add(p.eosID));
+          summary.groups.push({
+            teamID: pending.teamID,
+            partyID: pending.partyID ?? null,
+            targetTeamID: pending.targetTeamID,
+            players: pending.players.map((p) => p.eosID),
+            outcome: 'skipped',
+            moved: 0,
+            departed: [],
+            reason: `Attempt stopped: ${error.message}`
+          });
+        }
+        throw error;
+      }
     }
   }
 
-  async autoBalanceTeams() {
-    let players = await readSwitchRoster(this.server);
-    if (this.pendingBalanceMove) {
-      const pending = this.pendingBalanceMove;
-      players = (await this.movePlayers(pending.players, pending.teamID, true)).players;
-      this.pendingBalanceMove = null;
-    }
-    while (this.active) {
+  async autoBalanceTeams(
+    summary = { planned: 0, skipped: 0, failed: 0, groups: [] },
+    excluded = new Set(),
+    isActive = () => this.active
+  ) {
+    if (!this.options.shuffleEnabled) return;
+    let players = await readSwitchRoster(this.server, []);
+    while (isActive()) {
       const difference = this.getTeamBalanceDifference(players);
       if (Math.abs(difference) <= 1) return;
       const teamID = difference > 0 ? 1 : 2;
+      const eligible = (p) => !this.swappedPlayers.has(p.eosID) && !excluded.has(p.eosID);
       const candidates = switchGroups(players.filter((p) => p.teamID === teamID))
-        .filter((group) => !group.players.some((p) => this.swappedPlayers.has(p.eosID)))
+        .filter((group) => group.players.every(eligible))
         .sort((a, b) => a.players.length - b.players.length);
-      // Ordinary squads may supply individuals; a party is always an indivisible group.
       candidates.push(
         ...players
-          .filter(
-            (p) => p.teamID === teamID && p.partyID == null && !this.swappedPlayers.has(p.eosID)
-          )
-          .map((p) => ({ players: [p] }))
+          .filter((p) => p.teamID === teamID && p.partyID == null && eligible(p))
+          .map((p) => ({ teamID, players: [p] }))
       );
       const group = candidates.find(
         (candidate) =>
@@ -1523,30 +1896,35 @@ export default class SmartSwitch extends DiscordBasePlugin {
           Math.abs(difference)
       );
       if (!group) {
+        summary.remainingGap = Math.abs(difference);
         this.verbose(
           1,
           'No whole party or eligible player can improve balance; leaving the remaining gap'
         );
         return;
       }
-      this.pendingBalanceMove = { players: group.players, teamID: teamID === 1 ? 2 : 1 };
-      const result = await this.movePlayers(group.players, this.pendingBalanceMove.teamID, true);
-      this.pendingBalanceMove = null;
-      if (result.moved.size === 0) return;
-      players = result.players;
+      const execution = await this.moveShuffleGroup(
+        group,
+        teamID === 1 ? 2 : 1,
+        summary,
+        excluded,
+        isActive,
+        true,
+        'balance',
+        players
+      );
+      players = execution.players ?? (await readSwitchRoster(this.server, []));
     }
   }
 
-  async sendReshuffleReport(currentWinTeam, ticketDifferenceStr, switchedSquads) {
+  async sendReshuffleReport(currentWinTeam, ticketDifferenceStr, switchedSquads, summary) {
     const matchStats = this.teamStats;
     const winTeamLabel = currentWinTeam ? `Team ${currentWinTeam}` : 'N/A';
 
     const overviewEmbed = {
       title: '📊 Squad Balancer Triggered',
       color: this.options.color,
-      description: this.options.considerTicketDifference
-        ? `Reshuffling squads due to ${this.consecutiveWins} consecutive wins by ${winTeamLabel} with a ticket difference of ${ticketDifferenceStr}.`
-        : `Reshuffling squads due to ${this.consecutiveWins} consecutive wins by ${winTeamLabel} (ticket difference not considered).`,
+      description: `${summary?.trigger === 'queued' ? 'Queued' : 'Automatic'} shuffle attempt finished. Confirmed moved: ${this.swappedPlayers.size}.`,
       fields: [
         { name: '🏆 Winning Team', value: winTeamLabel, inline: true },
         { name: '🔄 Consecutive Wins', value: this.consecutiveWins.toString(), inline: true },
@@ -1565,7 +1943,7 @@ export default class SmartSwitch extends DiscordBasePlugin {
       timestamp: new Date()
     };
 
-    await this.sendDiscordMessage({ embed: overviewEmbed });
+    await this.sendDiscordMessage({ embed: overviewEmbed, allowedMentions: { parse: [] } });
 
     const players = await this.server.rcon.getListPlayers();
     const squads = await this.server.rcon.getSquads();
@@ -1581,18 +1959,18 @@ export default class SmartSwitch extends DiscordBasePlugin {
       fields: [
         {
           name: '🔵 Team 1',
-          value: `${team1PlayerCount} players (${switchedSquads.team2.length} squads moved from Team 2)`,
+          value: `${team1PlayerCount} players (${switchedSquads.team2.length} completed shuffle groups from Team 2)`,
           inline: true
         },
         {
           name: '🔴 Team 2',
-          value: `${team2PlayerCount} players (${switchedSquads.team1.length} squads moved from Team 1)`,
+          value: `${team2PlayerCount} players (${switchedSquads.team1.length} completed shuffle groups from Team 1)`,
           inline: true
         }
       ]
     };
 
-    await this.sendDiscordMessage({ embed: balanceSummaryEmbed });
+    await this.sendDiscordMessage({ embed: balanceSummaryEmbed, allowedMentions: { parse: [] } });
 
     const team1Squads = {};
     const team2Squads = {};
@@ -1640,14 +2018,14 @@ export default class SmartSwitch extends DiscordBasePlugin {
         (player) =>
           String(player.teamID) === '1' && this.swappedPlayers.has(this.getPlayerIdentifier(player))
       )
-      .map((p) => p.name);
+      .map((p) => String(p.name).replace(/([\\`*_~|])/g, '\\$1'));
 
     const switchedPlayersTeam2 = players
       .filter(
         (player) =>
           String(player.teamID) === '2' && this.swappedPlayers.has(this.getPlayerIdentifier(player))
       )
-      .map((p) => p.name);
+      .map((p) => String(p.name).replace(/([\\`*_~|])/g, '\\$1'));
 
     const team1Embed = {
       title: '🔵 Team 1 Squad Composition',
@@ -1660,9 +2038,10 @@ export default class SmartSwitch extends DiscordBasePlugin {
             Object.values(team1Squads)
               .map(
                 (squad) =>
-                  `Squad ${squad.squadID}: ${squad.squadName} (${squad.players.length} players)`
+                  `Squad ${squad.squadID}: ${String(squad.squadName).replace(/([\\`*_~|])/g, '\\$1')} (${squad.players.length} players)`
               )
-              .join('\n') || 'No squads found',
+              .join('\n')
+              .slice(0, 1024) || 'No squads found',
           inline: false
         }
       ]
@@ -1687,9 +2066,10 @@ export default class SmartSwitch extends DiscordBasePlugin {
             Object.values(team2Squads)
               .map(
                 (squad) =>
-                  `Squad ${squad.squadID}: ${squad.squadName} (${squad.players.length} players)`
+                  `Squad ${squad.squadID}: ${String(squad.squadName).replace(/([\\`*_~|])/g, '\\$1')} (${squad.players.length} players)`
               )
-              .join('\n') || 'No squads found',
+              .join('\n')
+              .slice(0, 1024) || 'No squads found',
           inline: false
         }
       ]
@@ -1704,10 +2084,10 @@ export default class SmartSwitch extends DiscordBasePlugin {
     }
 
     if (team1Embed.fields.length > 0) {
-      await this.sendDiscordMessage({ embed: team1Embed });
+      await this.sendDiscordMessage({ embed: team1Embed, allowedMentions: { parse: [] } });
     }
     if (team2Embed.fields.length > 0) {
-      await this.sendDiscordMessage({ embed: team2Embed });
+      await this.sendDiscordMessage({ embed: team2Embed, allowedMentions: { parse: [] } });
     }
   }
 }

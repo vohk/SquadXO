@@ -142,9 +142,11 @@ test('authenticates, serializes commands, combines responses, and separates chat
   try {
     await client.connect();
     assert.equal(client.state, 'ready');
+    const version = client.commandVersion;
     const chat = onceWithTimeout<RconPacket>(client, 'chat');
     const first = client.execute('first');
     const second = client.execute('second');
+    assert.equal(client.commandVersion, version + 2);
     assert.equal(await first, 'chunk one chunk two');
     assert.equal(await second, 'chunk one chunk two');
     assert.equal((await chat).body, 'unsolicited');
