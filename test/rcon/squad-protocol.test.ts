@@ -1,3 +1,4 @@
+import { shufflePlayersResponse, shufflePartiesResponse } from './fixtures/shuffle-roster.js';
 import { playersResponse, squadsResponse, partiesResponse } from './fixtures/patch-rcon.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -250,4 +251,27 @@ test('malformed or duplicate active rows reject the entire roster', () => {
     ),
     []
   );
+});
+
+test('shuffle capture preserves raw leader flags and agrees across player and party responses', () => {
+  const players = parsePlayerList(shufflePlayersResponse);
+  const parties = parsePartyList(shufflePartiesResponse);
+  const rawFlags = [...shufflePlayersResponse.matchAll(/Is Leader: (True|False)/g)].map(
+    (match) => match[1] === 'True'
+  );
+  assert.deepEqual(
+    players.map((player) => player.isLeader),
+    rawFlags
+  );
+  for (const party of parties) {
+    assert.equal(party.players.filter((player) => player.isLeader).length, 1);
+    assert.equal(new Set(party.players.map((player) => player.squadID)).size, 1);
+    for (const member of party.players) {
+      const player = players.find((candidate) => candidate.eosID === member.eosID);
+      assert.ok(player);
+      assert.equal(player.isLeader, member.isLeader);
+      assert.equal(player.squadID, member.squadID);
+      assert.equal(player.partyID, member.partyID);
+    }
+  }
 });
