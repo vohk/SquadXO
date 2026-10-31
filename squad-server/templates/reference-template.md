@@ -26,12 +26,14 @@ Legacy entries use `plugin`, `enabled` and top-level options. Native entries use
 
 [SmartSwitch options](#smartswitch) control requests, queues and automatic balancing.
 
-- Automatic shuffling and balancing keep parties together, even across squads. A party that cannot fit can leave a residual imbalance.
-- An ordinary member's explicit request is individual. A leader's request includes the entire party and checks the projected team gap before moving anyone.
-- Failed queues and partial shuffle destinations are retained. Overlapping queued players and squads are deduplicated; cooldowns are recorded only for observed moves.
-- The queue table's nullable `targetTeamID` column is added by an idempotent migration. Queue destinations persist across retries and restarts; in-memory squad and shuffle plans last only for the plugin instance.
+- `shuffleEnabled` defaults to `true`. Set it to `false` to disable queued/automatic shuffling and balancing while retaining manual player/squad commands and their queues. Disabled `queueshuffle` requests receive a warning.
+- A queued shuffle or the consecutive-win counter triggers one round-end attempt. Skipped or failed shuffle plans are discarded afterward; the next round starts without a pending shuffle. Unrelated player/squad queues remain until their destinations are verified.
+- Selection targets about half of the smaller team, choosing nearby whole-party sizes and using ordinary squad members to fill the target. Non-party commands are interleaved between teams; a secondary pass uses unassigned or other eligible players to reduce the gap. Parties stay together across squads, so exact half movement or perfect balance is not always possible.
+- Each move uses a fresh roster. Departed targets are removed while ordinary survivors continue; party survivors require coherent current membership and an unambiguous leader flag. Unsafe survivors are skipped, while unconfirmed commands, changed confirmed destinations, unexpected movement or invalid response data stop the attempt without blind retries.
+- Console and Discord results include planned, confirmed moved, departed, skipped and failed counts with reasons, plus movement fractions from each original team, joins/departures and the final size gap. Reporting failures do not prevent cleanup. Cooldowns apply only to observed moves.
+- An ordinary member's explicit request is individual; a leader's request includes the party. The roster's `isLeader` flag is used conservatively: it is not assumed to identify a unique party leader when several squad leaders or no leaders are reported.
 
-Whole-party moves use the roster's `isLeader` flag as the party-leader signal. See the [shared team-switch contract](../contracts/legacy-plugin-compatibility.md#party-aware-team-changes) for roster validation and command verification.
+The queue table's nullable `targetTeamID` column is added by an idempotent migration. Explicit queue destinations persist across retries and restarts. See the [shared team-switch contract](../contracts/legacy-plugin-compatibility.md#party-aware-team-changes).
 
 ## Native plugins
 

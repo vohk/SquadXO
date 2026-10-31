@@ -126,6 +126,10 @@ export async function buildReadme() {
 
 export async function buildReference(overrides = {}) {
   const { legacy, native } = await catalog(overrides);
+  const config = await buildConfig({ ...overrides, legacy, native });
+  const examples = new Map(config.plugins.map((entry) => [pluginConfigKey(entry), entry]));
+  const example = (key) =>
+    `\n\nCopy into the \`plugins\` array:\n\n\`\`\`json\n${JSON.stringify(examples.get(key), null, 2)}\n\`\`\`\n`;
   const legacyInfo = sortedPluginNames(legacy).map((name) => {
     const Plugin = legacy[name];
     const rows = Object.entries(Plugin.optionsSpecification).map(([key, option]) => [
@@ -135,7 +139,7 @@ export async function buildReference(overrides = {}) {
       code(displayGeneratedValue(key, option.default)),
       cell(option.description)
     ]);
-    return `### ${name}\n\nGenerated enabled default: ${code(Plugin.defaultEnabled)}.\n\n${table(['Option', 'Required', 'Connector', 'Default', 'Description'], rows)}`;
+    return `### ${name}\n\nGenerated enabled default: ${code(Plugin.defaultEnabled)}.\n\n${table(['Option', 'Required', 'Connector', 'Default', 'Description'], rows)}${example(`legacy:${name}`)}`;
   });
   const nativeInfo = native.map(({ module, definition }) => {
     const optionRows = Object.entries(definition.options).map(([key, option]) => [
@@ -151,7 +155,7 @@ export async function buildReference(overrides = {}) {
       declaration.required === false ? 'no' : 'yes',
       cell(declaration.description)
     ]);
-    return `### ${definition.name}\n\n${definition.description ? `${definition.description}\n\n` : ''}Module: ${code(module)} · API: ${code(definition.apiVersion)}.\n\n${table(['Alias', 'Connector type', 'Required', 'Description'], connectorRows)}\n${table(['Option', 'Type', 'Required', 'Default', 'Description'], optionRows)}`;
+    return `### ${definition.name}\n\n${definition.description ? `${definition.description}\n\n` : ''}Module: ${code(module)} · API: ${code(definition.apiVersion)}.\n\n${table(['Alias', 'Connector type', 'Required', 'Description'], connectorRows)}\n${table(['Option', 'Type', 'Required', 'Default', 'Description'], optionRows)}${example(`native:${definition.name}`)}`;
   });
   const template = await fs.readFile(path.join(templates, 'reference-template.md'), 'utf8');
   return (
@@ -202,12 +206,19 @@ function isCredentialOption(name) {
   return /(api.?key|password|secret|token|webhook)/i.test(name);
 }
 function generatedConfigValue(name, value) {
-  return isCredentialOption(name) && value != null ? '' : value;
+  if (isCredentialOption(name) && value != null) return '';
+  if (value instanceof RegExp) return value.source;
+  if (Array.isArray(value)) return value.map((item) => generatedConfigValue('', item));
+  if (value && typeof value === 'object')
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, generatedConfigValue(key, item)])
+    );
+  return value;
 }
 function displayGeneratedValue(name, value) {
   if (value === undefined) return 'no default';
   if (isCredentialOption(name) && value != null) return '[redacted]';
-  return typeof value === 'object' ? JSON.stringify(value) : value;
+  return typeof value === 'object' ? JSON.stringify(generatedConfigValue(name, value)) : value;
 }
 
 async function builtinSources(directory) {

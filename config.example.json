@@ -396,6 +396,7 @@
       "channelID": "",
       "color": 16761867,
       "testMode": false,
+      "shuffleEnabled": true,
       "consecutiveWinsThreshold": 3,
       "shuffleDelaySeconds": 15,
       "recentShuffleClearMinutes": 15,
@@ -449,7 +450,7 @@
         {
           "type": "regex",
           "logic": "match=allow",
-          "rule": {}
+          "rule": "a-z\\d=\\$\\[\\]\\!\\.\\s\\-"
         }
       ]
     },

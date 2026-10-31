@@ -33,6 +33,22 @@ Generated enabled default: `true`.
 | `onlyKickOnlineAlt` | no | — | `true` | Checks if a player with the same IP is already connected to server and kicks the player that is trying to connect |
 | `kickReason` | no | — | `ALT detected. Protection kick` | Reason of the kick due to an ALT account being detected |
 
+
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "AltChecker",
+  "enabled": true,
+  "discordClient": "discord",
+  "commandPrefix": "!altcheck",
+  "channelID": "",
+  "kickIfAltDetected": false,
+  "onlyKickOnlineAlt": true,
+  "kickReason": "ALT detected. Protection kick"
+}
+```
+
 ### AutoKickUnassigned
 
 Generated enabled default: `true`.
@@ -48,6 +64,24 @@ Generated enabled default: `true`.
 | `ignoreAdmins` | no | — | `false` | <ul><li><code>true</code>: Admins will <b>NOT</b> be kicked</li><li><code>false</code>: Admins <b>WILL</b> be kicked</li></ul> |
 | `ignoreWhitelist` | no | — | `false` | <ul><li><code>true</code>: Reserve slot players will <b>NOT</b> be kicked</li><li><code>false</code>: Reserve slot players <b>WILL</b> be kicked</li></ul> |
 
+
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "AutoKickUnassigned",
+  "enabled": true,
+  "warningMessage": "Join a squad, you are unassigned and will be kicked",
+  "kickMessage": "Unassigned - automatically removed",
+  "frequencyOfWarnings": 30,
+  "unassignedTimer": 360,
+  "playerThreshold": 93,
+  "roundStartDelay": 900,
+  "ignoreAdmins": false,
+  "ignoreWhitelist": false
+}
+```
+
 ### AutoTKWarn
 
 Generated enabled default: `true`.
@@ -56,6 +90,18 @@ Generated enabled default: `true`.
 | --- | --- | --- | --- | --- |
 | `attackerMessage` | no | — | `Please apologise for ALL TKs in ALL chat!` | The message to warn attacking players with. |
 | `victimMessage` | no | — | `null` | The message that will be sent to the victim. |
+
+
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "AutoTKWarn",
+  "enabled": true,
+  "attackerMessage": "Please apologise for ALL TKs in ALL chat!",
+  "victimMessage": null
+}
+```
 
 ### CBLInfo
 
@@ -67,6 +113,19 @@ Generated enabled default: `true`.
 | `channelID` | yes | — | `` | The ID of the channel to alert admins through. |
 | `threshold` | no | — | `6` | Admins will be alerted when a player has this or more reputation points. For more information on reputation points, see the <a href="https://communitybanlist.com/faq">Community Ban List's FAQ</a> |
 
+
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "CBLInfo",
+  "enabled": true,
+  "discordClient": "discord",
+  "channelID": "",
+  "threshold": 6
+}
+```
+
 ### ChatCommands
 
 Generated enabled default: `true`.
@@ -74,6 +133,24 @@ Generated enabled default: `true`.
 | Option | Required | Connector | Default | Description |
 | --- | --- | --- | --- | --- |
 | `commands` | no | — | `[{"command":"squadjs","type":"warn","response":"This server is powered by SquadJS.","ignoreChats":[]}]` | An array of objects containing the following properties: <ul><li><code>command</code> - The command that initiates the message.</li><li><code>type</code> - Either <code>warn</code> or <code>broadcast</code>.</li><li><code>response</code> - The message to respond with.</li><li><code>ignoreChats</code> - A list of chats to ignore the commands in. Use this to limit it to admins.</li></ul> |
+
+
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "ChatCommands",
+  "enabled": true,
+  "commands": [
+    {
+      "command": "squadjs",
+      "type": "warn",
+      "response": "This server is powered by SquadJS.",
+      "ignoreChats": []
+    }
+  ]
+}
+```
 
 ### DBLog
 
@@ -85,6 +162,24 @@ Generated enabled default: `false`.
 | `overrideServerID` | no | — | `null` | A overridden server ID. |
 | `eosBackfill` | no | — | `{"mode":"off","batchSize":5000,"pauseMs":500,"runForMinutes":0}` | Controls the optional historical EOS ID backfill. Leave mode off for fast startup, use background for throttled online work, or blocking during maintenance. |
 
+
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "DBLog",
+  "enabled": false,
+  "database": "sqlite",
+  "overrideServerID": null,
+  "eosBackfill": {
+    "mode": "off",
+    "batchSize": 5000,
+    "pauseMs": 500,
+    "runForMinutes": 0
+  }
+}
+```
+
 ### DiscordAdminBroadcast
 
 Generated enabled default: `false`.
@@ -95,6 +190,19 @@ Generated enabled default: `false`.
 | `channelID` | yes | — | `` | The ID of the channel to log admin broadcasts to. |
 | `color` | no | — | `16761867` | The color of the embed. |
 
+
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "DiscordAdminBroadcast",
+  "enabled": false,
+  "discordClient": "discord",
+  "channelID": "",
+  "color": 16761867
+}
+```
+
 ### DiscordAdminCamLogs
 
 Generated enabled default: `false`.
@@ -104,6 +212,19 @@ Generated enabled default: `false`.
 | `discordClient` | yes | `discord` | `discord` | Discord connector name. |
 | `channelID` | yes | — | `` | The ID of the channel to log admin camera usage to. |
 | `color` | no | — | `16761867` | The color of the embed. |
+
+
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "DiscordAdminCamLogs",
+  "enabled": false,
+  "discordClient": "discord",
+  "channelID": "",
+  "color": 16761867
+}
+```
 
 ### DiscordChat
 
@@ -117,6 +238,23 @@ Generated enabled default: `true`.
 | `color` | no | — | `16761867` | The color of the embed. |
 | `ignoreChats` | no | — | `["ChatSquad"]` | A list of chat names to ignore. |
 
+
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "DiscordChat",
+  "enabled": true,
+  "discordClient": "discord",
+  "channelID": "",
+  "chatColors": {},
+  "color": 16761867,
+  "ignoreChats": [
+    "ChatSquad"
+  ]
+}
+```
+
 ### DiscordChatRaw
 
 Generated enabled default: `true`.
@@ -126,6 +264,21 @@ Generated enabled default: `true`.
 | `discordClient` | yes | `discord` | `discord` | Discord connector name. |
 | `channelID` | yes | — | `` | The ID of the channel used for raw chat logs. |
 | `ignoreChats` | no | — | `["ChatSquad"]` | A list of chat names to ignore. |
+
+
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "DiscordChatRaw",
+  "enabled": true,
+  "discordClient": "discord",
+  "channelID": "",
+  "ignoreChats": [
+    "ChatSquad"
+  ]
+}
+```
 
 ### DiscordDebug
 
@@ -137,6 +290,19 @@ Generated enabled default: `false`.
 | `channelID` | yes | — | `` | The ID of the channel to log events to. |
 | `events` | yes | — | `[]` | A list of events to dump. |
 
+
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "DiscordDebug",
+  "enabled": false,
+  "discordClient": "discord",
+  "channelID": "",
+  "events": []
+}
+```
+
 ### DiscordFOBHABExplosionDamage
 
 Generated enabled default: `true`.
@@ -146,6 +312,19 @@ Generated enabled default: `true`.
 | `discordClient` | yes | `discord` | `discord` | Discord connector name. |
 | `channelID` | yes | — | `` | The ID of the channel to log FOB/HAB explosion damage to. |
 | `color` | no | — | `16761867` | The color of the embeds. |
+
+
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "DiscordFOBHABExplosionDamage",
+  "enabled": true,
+  "discordClient": "discord",
+  "channelID": "",
+  "color": 16761867
+}
+```
 
 ### DiscordKillFeed
 
@@ -158,6 +337,20 @@ Generated enabled default: `false`.
 | `color` | no | — | `16761867` | The color of the embeds. |
 | `disableCBL` | no | — | `false` | Disable Community Ban List information. |
 
+
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "DiscordKillFeed",
+  "enabled": false,
+  "discordClient": "discord",
+  "channelID": "",
+  "color": 16761867,
+  "disableCBL": false
+}
+```
+
 ### DiscordPlaceholder
 
 Generated enabled default: `true`.
@@ -167,6 +360,19 @@ Generated enabled default: `true`.
 | `discordClient` | yes | `discord` | `discord` | Discord connector name. |
 | `command` | no | — | `!placeholder` | Command to create Discord placeholder. |
 | `channelID` | yes | — | `` | The bot will only answer with a placeholder on this channel |
+
+
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "DiscordPlaceholder",
+  "enabled": true,
+  "discordClient": "discord",
+  "command": "!placeholder",
+  "channelID": ""
+}
+```
 
 ### DiscordRcon
 
@@ -179,6 +385,20 @@ Generated enabled default: `false`.
 | `permissions` | no | — | `{}` | <ul><li>Dictionary of roles and a list of the permissions they are allowed to use.<li>If dictionary is empty (<code>{}</code>) permissions will be disabled</li><li>A list of available RCON commands can be found here <a>https://squad.gamepedia.com/Server_Administration#Admin_Console_Commands</a>.</ul> |
 | `prependAdminNameInBroadcast` | no | — | `false` | Prepend admin names when making announcements. |
 
+
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "DiscordRcon",
+  "enabled": false,
+  "discordClient": "discord",
+  "channelID": "",
+  "permissions": {},
+  "prependAdminNameInBroadcast": false
+}
+```
+
 ### DiscordRoundWinner
 
 Generated enabled default: `false`.
@@ -188,6 +408,19 @@ Generated enabled default: `false`.
 | `discordClient` | yes | `discord` | `discord` | Discord connector name. |
 | `channelID` | yes | — | `` | The ID of the channel to log admin broadcasts to. |
 | `color` | no | — | `16761867` | The color of the embed. |
+
+
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "DiscordRoundWinner",
+  "enabled": false,
+  "discordClient": "discord",
+  "channelID": "",
+  "color": 16761867
+}
+```
 
 ### DiscordServerStatus
 
@@ -202,6 +435,22 @@ Generated enabled default: `true`.
 | `updateInterval` | no | — | `60000` | How frequently to update the time in Discord. |
 | `setBotStatus` | no | — | `true` | Whether to update the bot's status with server information. |
 
+
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "DiscordServerStatus",
+  "enabled": true,
+  "discordClient": "discord",
+  "messageStore": "sqlite",
+  "command": "!status",
+  "disableSubscriptions": false,
+  "updateInterval": 60000,
+  "setBotStatus": true
+}
+```
+
 ### DiscordSquadCreated
 
 Generated enabled default: `false`.
@@ -212,6 +461,20 @@ Generated enabled default: `false`.
 | `channelID` | yes | — | `` | The ID of the channel to log Squad Creation events to. |
 | `color` | no | — | `16761867` | The color of the embed. |
 | `useEmbed` | no | — | `true` | Send message as Embed |
+
+
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "DiscordSquadCreated",
+  "enabled": false,
+  "discordClient": "discord",
+  "channelID": "",
+  "color": 16761867,
+  "useEmbed": true
+}
+```
 
 ### DiscordTeamkill
 
@@ -224,6 +487,20 @@ Generated enabled default: `true`.
 | `color` | no | — | `16761867` | The color of the embeds. |
 | `disableCBL` | no | — | `false` | Disable Community Ban List information. |
 
+
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "DiscordTeamkill",
+  "enabled": true,
+  "discordClient": "discord",
+  "channelID": "",
+  "color": 16761867,
+  "disableCBL": false
+}
+```
+
 ### FogOfWar
 
 Generated enabled default: `false`.
@@ -233,6 +510,18 @@ Generated enabled default: `false`.
 | `mode` | no | — | `1` | Fog of war mode to set. |
 | `delay` | no | — | `10000` | Delay before setting fog of war mode. |
 
+
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "FogOfWar",
+  "enabled": false,
+  "mode": 1,
+  "delay": 10000
+}
+```
+
 ### IntervalledBroadcasts
 
 Generated enabled default: `false`.
@@ -241,6 +530,18 @@ Generated enabled default: `false`.
 | --- | --- | --- | --- | --- |
 | `broadcasts` | no | — | `[]` | Messages to broadcast. |
 | `interval` | no | — | `300000` | Frequency of the broadcasts in milliseconds. |
+
+
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "IntervalledBroadcasts",
+  "enabled": false,
+  "broadcasts": [],
+  "interval": 300000
+}
+```
 
 ### PlayerStateTracker
 
@@ -255,6 +556,22 @@ Generated enabled default: `false`.
 | `seedingReopenDelayMinutes` | no | — | `2` | Continuous minutes below seedingReopenBelow required before seeding reopens in the same round. |
 | `minUnlockedSquadSize` | no | — | `3` | Minimum squad size required for unlocked squad leaders to qualify during live play. |
 
+
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "PlayerStateTracker",
+  "enabled": false,
+  "database": "sqlite",
+  "seedingMinPlayers": 1,
+  "liveTarget": 70,
+  "seedingReopenBelow": 65,
+  "seedingReopenDelayMinutes": 2,
+  "minUnlockedSquadSize": 3
+}
+```
+
 ### PteroMonitor
 
 Generated enabled default: `false`.
@@ -267,6 +584,21 @@ Generated enabled default: `false`.
 | `updateInterval` | no | — | `10` | The update interval for the server to pull stats from (in seconds). |
 | `fetchTimeout` | no | — | `8` | Maximum time to wait for the panel API before skipping this sample (in seconds). |
 
+
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "PteroMonitor",
+  "enabled": false,
+  "apiPrefix": "https://panel.example.com",
+  "serverUUID": null,
+  "apiToken": null,
+  "updateInterval": 10,
+  "fetchTimeout": 8
+}
+```
+
 ### RollingFileLogger
 
 Generated enabled default: `false`.
@@ -278,6 +610,21 @@ Generated enabled default: `false`.
 | `filenamePrefix` | no | — | `squadjs` | Prefix used for rolling log file names. |
 | `includeConsole` | no | — | `true` | When true, direct <code>console.log</code>, <code>console.error</code>, and <code>console.trace</code> calls are also written to the file. |
 | `stripAnsi` | no | — | `true` | When true, ANSI color and cursor control sequences are removed from file output. |
+
+
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "RollingFileLogger",
+  "enabled": false,
+  "logDir": "./logs/squadjs",
+  "retention": 10,
+  "filenamePrefix": "squadjs",
+  "includeConsole": true,
+  "stripAnsi": true
+}
+```
 
 ### SeedingMode
 
@@ -293,6 +640,24 @@ Generated enabled default: `true`.
 | `liveMessage` | no | — | `Live!` | "Live" message to display. |
 | `waitOnNewGames` | no | — | `true` | Should the plugin wait to be executed on NEW_GAME event. |
 | `waitTimeOnNewGame` | no | — | `30` | The time to wait before check player counts in seconds. |
+
+
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "SeedingMode",
+  "enabled": true,
+  "interval": 150000,
+  "seedingThreshold": 50,
+  "seedingMessage": "Seeding Rules Active! Fight only over the middle flags! No FOB Hunting!",
+  "liveEnabled": true,
+  "liveThreshold": 52,
+  "liveMessage": "Live!",
+  "waitOnNewGames": true,
+  "waitTimeOnNewGame": 30
+}
+```
 
 ### SmartSwitch
 
@@ -316,6 +681,7 @@ Generated enabled default: `true`.
 | `channelID` | yes | — | `` | The ID of the Discord channel to log squad balancing events to. |
 | `color` | no | — | `16761867` | The color of the embed for Discord logging. |
 | `testMode` | no | — | `false` | When enabled, performs database validation but skips any actual team balancing actions. |
+| `shuffleEnabled` | no | — | `true` | Enable queued and automatic shuffles and their balancing. Manual player/squad switches and their queues remain available. |
 | `consecutiveWinsThreshold` | no | — | `3` | Number of consecutive round wins before triggering reshuffle. |
 | `shuffleDelaySeconds` | no | — | `15` | Delay in seconds after round end before performing the reshuffle. |
 | `recentShuffleClearMinutes` | no | — | `15` | Minutes after a shuffle to clear the recent shuffle switch lockout. |
@@ -328,6 +694,50 @@ Generated enabled default: `true`.
 | `reviveWeight` | no | — | `1` | Weight factor for revives in performance calculation. |
 | `teamkillWeight` | no | — | `-2` | Weight factor for teamkills in performance calculation (negative value reduces score). |
 
+
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "SmartSwitch",
+  "enabled": true,
+  "discordClient": "discord",
+  "commandPrefix": [
+    "!switch",
+    "!change"
+  ],
+  "doubleSwitchCommands": [],
+  "doubleSwitchCooldownHours": 0.5,
+  "doubleSwitchDelaySeconds": 1,
+  "endMatchSwitchSlots": 3,
+  "switchCooldownHours": 3,
+  "switchEnabledMinutes": 5,
+  "doubleSwitchEnabledMinutes": 5,
+  "maxUnbalancedSlots": 3,
+  "switchToOldTeamAfterRejoin": false,
+  "database": "sqlite",
+  "memberPrefix": "",
+  "channelID": "",
+  "color": 16761867,
+  "testMode": false,
+  "shuffleEnabled": true,
+  "consecutiveWinsThreshold": 3,
+  "shuffleDelaySeconds": 15,
+  "recentShuffleClearMinutes": 15,
+  "showBroadcasts": true,
+  "considerTicketDifference": false,
+  "ticketDifferenceThreshold": 200,
+  "invasionTicketDifferenceThreshold": 700,
+  "excludedLayers": [
+    "seed",
+    "jensen"
+  ],
+  "killWeight": 1,
+  "reviveWeight": 1,
+  "teamkillWeight": -2
+}
+```
+
 ### SocketIOAPI
 
 Generated enabled default: `false`.
@@ -336,6 +746,18 @@ Generated enabled default: `false`.
 | --- | --- | --- | --- | --- |
 | `websocketPort` | yes | — | `` | The port for the websocket. |
 | `securityToken` | yes | — | `[redacted]` | Your secret token/password for connecting. |
+
+
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "SocketIOAPI",
+  "enabled": false,
+  "websocketPort": "",
+  "securityToken": ""
+}
+```
 
 ### SquadBaiting
 
@@ -351,6 +773,23 @@ Generated enabled default: `true`.
 | `playerRules` | no | — | `[]` | Set of rules that will be applied on player events |
 | `squadRules` | no | — | `[]` | Set of rules that will be applied on squad events |
 
+
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "SquadBaiting",
+  "enabled": true,
+  "discordClient": "discord",
+  "channelID": "",
+  "warnInGameAdmins": true,
+  "resetPlayerCountersAtNewGame": true,
+  "disableDefaultAdminWarns": false,
+  "playerRules": [],
+  "squadRules": []
+}
+```
+
 ### SquadCreationBlocker
 
 Generated enabled default: `false`.
@@ -365,6 +804,23 @@ Generated enabled default: `false`.
 | `rateLimitMaxSquads` | no | — | `3` | The maximum number of custom squads a player can create within the rate limit window. |
 | `rateLimitBackoffTime` | no | — | `10` | The time (in seconds) a player must wait after exceeding the rate limit before creating another custom squad. |
 
+
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "SquadCreationBlocker",
+  "enabled": false,
+  "blockDuration": 15,
+  "broadcastMode": false,
+  "allowDefaultSquadNames": true,
+  "rateLimitEnforced": false,
+  "rateLimitWindow": 2,
+  "rateLimitMaxSquads": 3,
+  "rateLimitBackoffTime": 10
+}
+```
+
 ### SquadNameValidator
 
 Generated enabled default: `true`.
@@ -374,7 +830,27 @@ Generated enabled default: `true`.
 | `discordClient` | yes | `discord` | `discord` | Discord connector name. |
 | `channelID` | yes | — | `` | The ID of the channel to log admin broadcasts to. |
 | `warningMessage` | no | — | `Your squad has been disbanded due to non-compliant name. Forbidden: %FORBIDDEN%` |  |
-| `rules` | no | — | `[{"type":"regex","logic":"match=allow","rule":{}}]` |  |
+| `rules` | no | — | `[{"type":"regex","logic":"match=allow","rule":"a-z\\d=\\$\\[\\]\\!\\.\\s\\-"}]` |  |
+
+
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "SquadNameValidator",
+  "enabled": true,
+  "discordClient": "discord",
+  "channelID": "",
+  "warningMessage": "Your squad has been disbanded due to non-compliant name.\n\nForbidden: %FORBIDDEN%",
+  "rules": [
+    {
+      "type": "regex",
+      "logic": "match=allow",
+      "rule": "a-z\\d=\\$\\[\\]\\!\\.\\s\\-"
+    }
+  ]
+}
+```
 
 ### TeamRandomizer
 
@@ -383,6 +859,17 @@ Generated enabled default: `true`.
 | Option | Required | Connector | Default | Description |
 | --- | --- | --- | --- | --- |
 | `command` | no | — | `randomize` | The command used to randomize the teams. |
+
+
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "TeamRandomizer",
+  "enabled": true,
+  "command": "randomize"
+}
+```
 
 ### TpsLogger
 
@@ -396,6 +883,22 @@ Generated enabled default: `true`.
 | `httpServerPort` | no | — | `3030` | The port used by the http server |
 | `tpsHistoryLength` | no | — | `200` |  |
 | `simulateTpsDrops` | no | — | `false` |  |
+
+
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "TpsLogger",
+  "enabled": true,
+  "discordClient": "discord",
+  "commandPrefix": "!tps",
+  "httpServerEnabled": false,
+  "httpServerPort": 3030,
+  "tpsHistoryLength": 200,
+  "simulateTpsDrops": false
+}
+```
 
 ### unnAdminRequest
 
@@ -414,6 +917,27 @@ Generated enabled default: `true`.
 | `warnInGameAdmins` | no | — | `false` | Relay a new request directly to connected in-game admins. |
 | `showInGameAdmins` | no | — | `true` | Tell the requester how many in-game admins are connected. |
 | `autocloseAfterMinutes` | no | — | `10` | Close an unresolved request after this many minutes. |
+
+
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "unnAdminRequest",
+  "enabled": true,
+  "discordClient": "discord",
+  "channelID": "",
+  "ignoreChats": [],
+  "ignorePhrases": [],
+  "command": "admin",
+  "pingGroups": [],
+  "pingDelay": 60000,
+  "color": 16761867,
+  "warnInGameAdmins": false,
+  "showInGameAdmins": true,
+  "autocloseAfterMinutes": 10
+}
+```
 
 ### unnServerProfiler
 
@@ -434,6 +958,28 @@ Generated enabled default: `false`.
 | `compressionMethod` | no | — | `zip` | Attachment compression format: zip or gzip. |
 | `generateCharts` | no | — | `true` | Attach a lightweight SVG chart generated from numeric CSV columns. |
 
+
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "unnServerProfiler",
+  "enabled": false,
+  "discordClient": "discord",
+  "channelID": "",
+  "enableFileCompression": true,
+  "discordWebhook": null,
+  "minimumPlayerCount": 1,
+  "profilingFileDurationMinutes": null,
+  "storeProfilerFilesOnlyIfTpsDropDetected": false,
+  "overrideSquadGameDir": null,
+  "detectTPSDrops": false,
+  "simulateTpsDrops": false,
+  "compressionMethod": "zip",
+  "generateCharts": true
+}
+```
+
 ### VehicleEnteredLogger
 
 Generated enabled default: `true`.
@@ -444,16 +990,30 @@ Generated enabled default: `true`.
 | `channelID` | yes | — | `` | The ID of the channel to log admin broadcasts to. |
 
 
+Copy into the `plugins` array:
+
+```json
+{
+  "plugin": "VehicleEnteredLogger",
+  "enabled": true,
+  "discordClient": "discord",
+  "channelID": ""
+}
+```
+
+
 ## SmartSwitch behavior
 
 [SmartSwitch options](#smartswitch) control requests, queues and automatic balancing.
 
-- Automatic shuffling and balancing keep parties together, even across squads. A party that cannot fit can leave a residual imbalance.
-- An ordinary member's explicit request is individual. A leader's request includes the entire party and checks the projected team gap before moving anyone.
-- Failed queues and partial shuffle destinations are retained. Overlapping queued players and squads are deduplicated; cooldowns are recorded only for observed moves.
-- The queue table's nullable `targetTeamID` column is added by an idempotent migration. Queue destinations persist across retries and restarts; in-memory squad and shuffle plans last only for the plugin instance.
+- `shuffleEnabled` defaults to `true`. Set it to `false` to disable queued/automatic shuffling and balancing while retaining manual player/squad commands and their queues. Disabled `queueshuffle` requests receive a warning.
+- A queued shuffle or the consecutive-win counter triggers one round-end attempt. Skipped or failed shuffle plans are discarded afterward; the next round starts without a pending shuffle. Unrelated player/squad queues remain until their destinations are verified.
+- Selection targets about half of the smaller team, choosing nearby whole-party sizes and using ordinary squad members to fill the target. Non-party commands are interleaved between teams; a secondary pass uses unassigned or other eligible players to reduce the gap. Parties stay together across squads, so exact half movement or perfect balance is not always possible.
+- Each move uses a fresh roster. Departed targets are removed while ordinary survivors continue; party survivors require coherent current membership and an unambiguous leader flag. Unsafe survivors are skipped, while unconfirmed commands, changed confirmed destinations, unexpected movement or invalid response data stop the attempt without blind retries.
+- Console and Discord results include planned, confirmed moved, departed, skipped and failed counts with reasons, plus movement fractions from each original team, joins/departures and the final size gap. Reporting failures do not prevent cleanup. Cooldowns apply only to observed moves.
+- An ordinary member's explicit request is individual; a leader's request includes the party. The roster's `isLeader` flag is used conservatively: it is not assumed to identify a unique party leader when several squad leaders or no leaders are reported.
 
-Whole-party moves use the roster's `isLeader` flag as the party-leader signal. See the [shared team-switch contract](../contracts/legacy-plugin-compatibility.md#party-aware-team-changes) for roster validation and command verification.
+The queue table's nullable `targetTeamID` column is added by an idempotent migration. Explicit queue destinations persist across retries and restarts. See the [shared team-switch contract](../contracts/legacy-plugin-compatibility.md#party-aware-team-changes).
 
 ## Native plugins
 
@@ -476,6 +1036,27 @@ Module: `./dist/src/plugins/builtin/discord-operations.js` · API: `1`.
 | `allowedRoleIDs` | `string[]` | no | `[]` | Discord roles permitted to manage application commands. |
 | `allowAdministrator` | `boolean` | no | `true` | Permit members with Discord Administrator permission. |
 
+
+Copy into the `plugins` array:
+
+```json
+{
+  "type": "native",
+  "name": "discordOperations",
+  "module": "./dist/src/plugins/builtin/discord-operations.js",
+  "enabled": false,
+  "connectors": {
+    "discord": "discord"
+  },
+  "options": {
+    "guildID": "",
+    "commandName": "clear-application-commands",
+    "allowedRoleIDs": [],
+    "allowAdministrator": true
+  }
+}
+```
+
 ### discordRoundEnded
 
 Posts end-of-round results to configured Discord channels.
@@ -490,6 +1071,25 @@ Module: `./dist/src/plugins/builtin/discord-round-ended.js` · API: `1`.
 | --- | --- | --- | --- | --- |
 | `channelIDs` | `string[]` | no | `[]` | Discord channels that receive completed match results. |
 | `color` | `number` | no | `16761867` | The color of the result embed. |
+
+
+Copy into the `plugins` array:
+
+```json
+{
+  "type": "native",
+  "name": "discordRoundEnded",
+  "module": "./dist/src/plugins/builtin/discord-round-ended.js",
+  "enabled": false,
+  "connectors": {
+    "discord": "discord"
+  },
+  "options": {
+    "channelIDs": [],
+    "color": 16761867
+  }
+}
+```
 
 ### errorNotify
 
@@ -511,6 +1111,31 @@ Module: `./dist/src/plugins/builtin/error-notify.js` · API: `1`.
 | `attachLog` | `boolean` | no | `true` | Attach a compressed copy of the current SquadGame.log to each notification. |
 | `maximumAttachmentBytes` | `number` | no | `10485760` | Largest compressed attachment Discord accepts for the channel; larger logs are trimmed. |
 | `maximumSourceBytes` | `number` | no | `2147483648` | Maximum uncompressed SquadGame.log size copied for one notification. |
+
+
+Copy into the `plugins` array:
+
+```json
+{
+  "type": "native",
+  "name": "errorNotify",
+  "module": "./dist/src/plugins/builtin/error-notify.js",
+  "enabled": false,
+  "connectors": {
+    "discord": "discord"
+  },
+  "options": {
+    "channelID": "",
+    "patterns": [],
+    "mentionRoleIDs": [],
+    "caseSensitive": false,
+    "cooldownSeconds": 300,
+    "attachLog": true,
+    "maximumAttachmentBytes": 10485760,
+    "maximumSourceBytes": 2147483648
+  }
+}
+```
 
 ### logGrabber
 
@@ -551,6 +1176,29 @@ Module: `./dist/src/plugins/builtin/psg-monitor.js` · API: `1`.
 | `fetchTimeout` | `number` | no | `8` | Maximum time to wait for the node API before skipping this sample (in seconds). |
 | `overrideServerID` | `number` | no | `no default` | Server ID stored with each sample. Set it to the same value as DBLog overrideServerID; defaults to the instance server ID. |
 
+Copy into the `plugins` array:
+
+```json
+{
+  "type": "native",
+  "name": "logGrabber",
+  "module": "./dist/src/plugins/builtin/log-grabber.js",
+  "enabled": false,
+  "connectors": {
+    "discord": "discord"
+  },
+  "options": {
+    "guildID": "",
+    "commandName": "server-log",
+    "allowedRoleIDs": [],
+    "allowedChannelIDs": [],
+    "allowAdministrator": true,
+    "ephemeral": false,
+    "maximumSourceBytes": 2147483648
+  }
+}
+```
+
 ### rconRecorder
 
 Archives shared-client RCON command outcomes and pushed bodies as bounded JSONL/gzip files, without extra commands or authentication packets.
@@ -575,6 +1223,29 @@ None.
 ## psgMonitor (native) behavior
 
 The native `psgMonitor` targets the PSG Hosting panel fork and replaces the legacy `PteroMonitor` there. It polls the node's `GET /api/user/servers/{uuid}/resources` using a client API key (bearer); set `nodeUrl` to the node address shown by the panel's node-tokens endpoint, not the panel address. Samples are written to the same `PM_ServerUsages` table as the legacy plugin, with `status` 0-3 (offline, stopping, starting, running), `memory` and `disk` in bytes and `cpu` as the node's absolute percentage. Map `database` to the same connector as DBLog, and set `overrideServerID` if DBLog does; `match` is the open `DBLog_Matches` row for that server, or null. Run either the legacy or the native plugin, not both. API keys are subject to their allowed IP list, and `429` responses are logged and skipped until the next interval.
+Copy into the `plugins` array:
+
+```json
+{
+  "type": "native",
+  "name": "rconRecorder",
+  "module": "./dist/src/plugins/builtin/rcon-recorder.js",
+  "enabled": false,
+  "connectors": {},
+  "options": {
+    "directory": "./rcon-recordings",
+    "recordLogLines": false,
+    "retentionDays": 14,
+    "maxTotalMB": 1024,
+    "maxFileMB": 16,
+    "maxBufferMB": 4,
+    "maxEntryKB": 64,
+    "maxDedupEntries": 1024,
+    "compress": true
+  }
+}
+```
+
 
 ## RCON recorder behavior
 

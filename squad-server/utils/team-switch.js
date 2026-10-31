@@ -1,6 +1,19 @@
 // Shared by the legacy switchers: plan destinations, then verify each command once.
-export async function readSwitchRoster(server, previous = server.players ?? []) {
-  const players = await server.rcon.getListPlayers();
+const snapshots = new WeakMap();
+export async function readSwitchRoster(
+  server,
+  previous = server.players ?? [],
+  current,
+  operation
+) {
+  const snapshot = current && snapshots.get(current);
+  const before = server.rcon.getMutationVersion?.();
+  const reusable =
+    operation &&
+    snapshot?.server === server &&
+    snapshot.operation === operation &&
+    snapshot.version === before;
+  const players = reusable ? current : await server.rcon.getListPlayers();
   if (!Array.isArray(players) || players.length === 0) {
     throw new Error('Player roster is empty; team changes were not attempted');
   }
@@ -15,10 +28,11 @@ export async function readSwitchRoster(server, previous = server.players ?? []) 
     }
     ids.add(player.eosID);
   }
-  if (previous.some((player) => player.eosID && !ids.has(player.eosID))) {
-    throw new Error('Player roster changed or is incomplete; retry after a fresh roster');
-  }
-  return players.map((player) => ({ ...player }));
+  const result = players.map((player) => ({ ...player }));
+  // Stamp the version when the query was issued. A queued mutation after it
+  // invalidates the observation before dispatch, even if the query itself succeeds.
+  if (Number.isInteger(before)) snapshots.set(result, { server, version: before, operation });
+  return result;
 }
 
 export function switchGroups(players, bySquad = true) {
@@ -47,41 +61,130 @@ export async function moveToTeam(
   server,
   targets,
   teamID,
-  { isActive = () => true, onMoved = () => {}, roster } = {}
+  {
+    isActive = () => true,
+    onMoved = () => {},
+    onDeparted = () => {},
+    roster,
+    initialRoster,
+    operation,
+    wholeParties = false
+  } = {}
 ) {
   if ((teamID !== 1 && teamID !== 2) || targets.length === 0) {
     throw new Error('Team change requires players and a destination team');
   }
-  const ordered = [...targets].sort(
-    (a, b) => Number(Boolean(b.isLeader)) - Number(Boolean(a.isLeader))
-  );
-  for (const group of switchGroups(targets, false)) {
-    if (
-      group.partyID != null &&
-      group.players.length > 1 &&
-      group.players.filter((p) => p.isLeader).length !== 1
-    ) {
-      throw new Error('Party leader is missing or ambiguous; team change stopped');
-    }
-  }
-  const targetIDs = new Set(ordered.map((player) => player.eosID));
+  const targetIDs = new Set(targets.map((player) => player.eosID));
   const moved = new Set();
-  let players = await readSwitchRoster(server, roster);
-  for (const eosID of targetIDs) {
+  const commanded = new Set();
+  const departed = new Set();
+  const recordDeparture = (target) => {
+    if (departed.has(target.eosID)) return;
+    departed.add(target.eosID);
+    onDeparted(target);
+  };
+  let players;
+  try {
+    players = await readSwitchRoster(server, wholeParties ? [] : roster, initialRoster, operation);
+  } catch (error) {
+    error.stopShuffle = true;
+    throw error;
+  }
+  let first = true;
+  while (true) {
     if (!isActive()) throw new Error('Team change stopped because the plugin is inactive');
-    const player = players.find((candidate) => candidate.eosID === eosID);
-    if (!player || (player.teamID !== 1 && player.teamID !== 2)) {
-      throw new Error('A planned player is unavailable; team change stopped');
+    const currentTargets = [];
+    for (const target of targets) {
+      if (wholeParties && departed.has(target.eosID)) continue;
+      const player = players.find((candidate) => candidate.eosID === target.eosID);
+      if (!player && wholeParties) {
+        recordDeparture(target);
+        continue;
+      }
+      if (!player || (player.teamID !== 1 && player.teamID !== 2)) {
+        throw new Error('A planned player is unavailable; team change stopped');
+      }
+      currentTargets.push(player);
     }
-    if (player.teamID === teamID) continue;
+    if (currentTargets.some((player) => moved.has(player.eosID) && player.teamID !== teamID)) {
+      throw Object.assign(
+        new Error('A confirmed destination changed again; further team changes stopped'),
+        { stopShuffle: true }
+      );
+    }
+    const currentIDs = new Set(currentTargets.map((player) => player.eosID));
+    const pending = currentTargets.filter((player) => player.teamID !== teamID);
+    if (pending.length === 0) return { players, moved, departed };
+    for (const player of pending) {
+      const target = targets.find((candidate) => candidate.eosID === player.eosID);
+      if (wholeParties && (player.partyID !== target.partyID || player.teamID !== target.teamID)) {
+        throw new Error('Planned party membership or team changed; group skipped');
+      }
+    }
+    if (wholeParties || first) {
+      for (const group of switchGroups(currentTargets, false)) {
+        if (wholeParties && group.partyID != null) {
+          if (
+            players.some(
+              (player) =>
+                player.teamID === group.teamID &&
+                player.partyID === group.partyID &&
+                !currentIDs.has(player.eosID)
+            )
+          ) {
+            throw new Error('Current party contains a player outside the plan; group skipped');
+          }
+          const plannedParty = targets.filter(
+            (player) => player.teamID === group.teamID && player.partyID === group.partyID
+          );
+          if (
+            plannedParty.some((target) =>
+              currentTargets.some(
+                (player) => player.eosID === target.eosID && player.teamID !== group.teamID
+              )
+            )
+          ) {
+            throw new Error('Surviving party is split between teams; group stopped');
+          }
+        }
+        if (
+          group.teamID !== teamID &&
+          group.partyID != null &&
+          group.players.length > 1 &&
+          group.players.filter((p) => p.isLeader).length !== 1
+        ) {
+          throw new Error('Party leader is missing or ambiguous; team change stopped');
+        }
+      }
+    }
+    first = false;
+    pending.sort((a, b) => Number(Boolean(b.isLeader)) - Number(Boolean(a.isLeader)));
+    const eosID = pending[0].eosID;
+    if (commanded.has(eosID))
+      throw Object.assign(
+        new Error('A team command was already sent for this target; no retry sent'),
+        { stopShuffle: true }
+      );
+    const observation = snapshots.get(players);
+    if (observation && server.rcon.getMutationVersion?.() !== observation.version) {
+      players = await readSwitchRoster(server, wholeParties ? [] : roster, undefined, operation);
+      continue;
+    }
+    commanded.add(eosID);
     const before = players;
     let commandError;
     try {
-      await server.rcon.switchTeam(eosID);
+      await server.rcon.switchTeam(eosID, isActive);
     } catch (error) {
+      if (error.name === 'RconCommandCancelledError') throw error;
       commandError = error;
     }
-    players = await readSwitchRoster(server, before);
+    try {
+      players = await readSwitchRoster(server, wholeParties ? [] : before, undefined, operation);
+    } catch (error) {
+      error.stopShuffle = true;
+      throw error;
+    }
     const changed = players.filter((candidate) => {
       const old = before.find((previous) => previous.eosID === candidate.eosID);
       return old && old.teamID !== candidate.teamID;
@@ -90,13 +193,24 @@ export async function moveToTeam(
       moved.add(changedPlayer.eosID);
       onMoved(changedPlayer);
     }
+    if (wholeParties) {
+      for (const target of targets) {
+        if (!players.some((player) => player.eosID === target.eosID)) recordDeparture(target);
+      }
+    }
     if (changed.some((candidate) => !targetIDs.has(candidate.eosID))) {
-      throw new Error('The server moved players outside the plan; further team changes stopped');
+      throw Object.assign(
+        new Error('The server moved players outside the plan; further team changes stopped'),
+        { stopShuffle: true }
+      );
     }
-    if (players.find((candidate) => candidate.eosID === eosID)?.teamID !== teamID) {
-      throw commandError ?? new Error('The requested team change was not confirmed; no retry sent');
+    const observed = players.find((candidate) => candidate.eosID === eosID);
+    if (wholeParties && !observed) continue;
+    if (observed?.teamID !== teamID) {
+      throw Object.assign(
+        commandError ?? new Error('The requested team change was not confirmed; no retry sent'),
+        { stopShuffle: true }
+      );
     }
-    if (!isActive()) throw new Error('Team change stopped because the plugin is inactive');
   }
-  return { players, moved };
 }
