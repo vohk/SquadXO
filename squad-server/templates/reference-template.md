@@ -39,6 +39,10 @@ Module paths below are for the compiled runtime. Option defaults come from each 
 
 //NATIVE-PLUGIN-INFO//
 
+## psgMonitor (native) behavior
+
+The native `psgMonitor` targets the PSG Hosting panel fork and replaces the legacy `PteroMonitor` there. It polls the node's `GET /api/user/servers/{uuid}/resources` using a client API key (bearer); set `nodeUrl` to the node address shown by the panel's node-tokens endpoint, not the panel address. Samples are written to the same `PM_ServerUsages` table as the legacy plugin, with `status` 0-3 (offline, stopping, starting, running), `memory` and `disk` in bytes and `cpu` as the node's absolute percentage. Map `database` to the same connector as DBLog, and set `overrideServerID` if DBLog does; `match` is the open `DBLog_Matches` row for that server, or null. Run either the legacy or the native plugin, not both. API keys are subject to their allowed IP list, and `429` responses are logged and skipped until the next interval.
+
 ## RCON recorder behavior
 
 The native `rconRecorder` example is disabled. It records shared-client command outcomes and unsolicited pushed bodies while mounted; it sends no extra commands and excludes authentication packets. Its implementation was inspired by [lbzepoqo's RconRecorder](https://github.com/lbzepoqo/SquadJS/blob/0f686f8300270a8eb50b726d476a7c28771cd938/squad-server/plugins/rcon-recorder.js), with native subscriptions and new bounded storage. Original SquadJS copyright and Boost Software License notices are retained in source and `LICENSE`.

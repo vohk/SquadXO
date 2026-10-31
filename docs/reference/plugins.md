@@ -532,6 +532,25 @@ Module: `./dist/src/plugins/builtin/log-grabber.js` · API: `1`.
 | `ephemeral` | `boolean` | no | `false` | Send successful log downloads as ephemeral interaction responses. |
 | `maximumSourceBytes` | `number` | no | `2147483648` | Maximum uncompressed SquadGame.log size accepted for one request. |
 
+### psgMonitor
+
+Monitors server resource usage through the PSG Hosting node API and saves it to the database.
+
+Module: `./dist/src/plugins/builtin/psg-monitor.js` · API: `1`.
+
+| Alias | Connector type | Required | Description |
+| --- | --- | --- | --- |
+| `database` | `sequelize` | yes | Database that receives samples. Use the same connection as DBLog. |
+
+| Option | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `nodeUrl` | `string` | yes | `no default` | Base URL of the node hosting the server, including port (the `url` of the matching item from the panel node-tokens endpoint). |
+| `serverUUID` | `string` | yes | `no default` | The UUID of the server to pull stats from. |
+| `apiToken` | `string` | yes | `no default` | A client API key, sent as a bearer token. Its allowed IP addresses apply. |
+| `updateInterval` | `number` | no | `10` | The update interval for the server to pull stats from (in seconds). |
+| `fetchTimeout` | `number` | no | `8` | Maximum time to wait for the node API before skipping this sample (in seconds). |
+| `overrideServerID` | `number` | no | `no default` | Server ID stored with each sample. Set it to the same value as DBLog overrideServerID; defaults to the instance server ID. |
+
 ### rconRecorder
 
 Archives shared-client RCON command outcomes and pushed bodies as bounded JSONL/gzip files, without extra commands or authentication packets.
@@ -552,6 +571,10 @@ None.
 | `maxDedupEntries` | `number` | no | `1024` | Maximum cached command/response fingerprints for same-response deduplication per file. |
 | `compress` | `boolean` | no | `true` | Gzip closed files when source plus scratch fits the total budget; otherwise retain JSONL. |
 
+
+## psgMonitor (native) behavior
+
+The native `psgMonitor` targets the PSG Hosting panel fork and replaces the legacy `PteroMonitor` there. It polls the node's `GET /api/user/servers/{uuid}/resources` using a client API key (bearer); set `nodeUrl` to the node address shown by the panel's node-tokens endpoint, not the panel address. Samples are written to the same `PM_ServerUsages` table as the legacy plugin, with `status` 0-3 (offline, stopping, starting, running), `memory` and `disk` in bytes and `cpu` as the node's absolute percentage. Map `database` to the same connector as DBLog, and set `overrideServerID` if DBLog does; `match` is the open `DBLog_Matches` row for that server, or null. Run either the legacy or the native plugin, not both. API keys are subject to their allowed IP list, and `429` responses are logged and skipped until the next interval.
 
 ## RCON recorder behavior
 
