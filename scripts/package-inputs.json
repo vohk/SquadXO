@@ -85,7 +85,7 @@
     "squad-server/plugins/index.js",
     "squad-server/plugins/intervalled-broadcasts.js",
     "squad-server/plugins/player-state-tracker.js",
-    "squad-server/plugins/psg-monitor.js",
+    "squad-server/plugins/ptero-monitor.js",
     "squad-server/plugins/rolling-file-logger.js",
     "squad-server/plugins/seeding-mode.js",
     "squad-server/plugins/smart-switch.js",
