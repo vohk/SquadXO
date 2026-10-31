@@ -96,6 +96,20 @@
       }
     },
     {
+      "type": "native",
+      "name": "psgMonitor",
+      "module": "./dist/src/plugins/builtin/psg-monitor.js",
+      "enabled": false,
+      "connectors": {
+        "database": "sqlite"
+      },
+      "options": {
+        "nodeUrl": "https://node.example.com:8080",
+        "serverUUID": "00000000-0000-0000-0000-000000000000",
+        "apiToken": "REPLACE_WITH_CLIENT_API_KEY"
+      }
+    },
+    {
       "plugin": "DBLog",
       "enabled": false,
       "database": "sqlite"
